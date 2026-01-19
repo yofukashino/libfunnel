@@ -12,6 +12,7 @@ Features:
 - [ ] Receiving frames
 - [ ] Multiple synchronized streams
 - [x] Implicit sync
+- [x] Hybrid sync (explicit API, implicit stream)
 - [ ] Explicit sync
 - [x] Async and multiple sync modes (with and without buffering)
 - [x] Raw GBM API
@@ -19,10 +20,11 @@ Features:
 - [x] Vulkan API integration
 - [ ] GLX API integration (if someone really really needs it... ideally apps should switch to X11+EGL)
 - [x] Cross-GPU frame sharing for reasonable drivers (untested but it should work?)
-- [ ] Cross-GPU frame sharing between Nvidia prop driver and other GPUs/drivers
-- [ ] Automatic optimization for cross-GPU frame sharing (framebuffer optimization/conversion blits)
+- [x] Vulkan: Cross-GPU frame sharing between Nvidia prop driver and other GPUs/drivers (can require special handling by user)
+- [ ] GL: Cross-GPU frame sharing between Nvidia prop driver and other GPUs/drivers
+- [ ] GL: Automatic optimization for cross-GPU frame sharing (framebuffer optimization/conversion blits)
 
-Note: Due to missing explicit sync support, the Nvidia proprietary driver is not currently well supported (frame sharing will work, but you might experience tearing or frame pacing issues). This is a planned feature, but it will require work by application developers (it cannot be made transparent in the API), so some apps might choose not to support it. In addition, frame sharing between an Nvidia GPU and a non-Nvidia GPU requires special support code and extra blitting, which will probably not be implemented until much later. If you have an Nvidia GPU, please consider using [NVK](https://docs.mesa3d.org/drivers/nvk.html) instead, since it implements all the missing features that Nvidia refuses to implement in their proprietary driver, and therefore doesn't require us application and library developers to add Nvidia-specific workaround code.
+Note: Due to missing explicit sync support, the Nvidia proprietary driver is not currently well supported (frame sharing will work, but you might experience tearing or frame pacing issues). This is a planned feature, but it will require work by OpenGL application developers (it cannot be made transparent in the API), so some apps might choose not to support it. In addition, frame sharing between an Nvidia GPU and a non-Nvidia GPU in OpenGL requires special support code and extra blitting, which will probably not be implemented until much later. If you have an Nvidia GPU, please consider using [NVK](https://docs.mesa3d.org/drivers/nvk.html) instead, since it implements all the missing features that Nvidia refuses to implement in their proprietary driver, and therefore doesn't require us application and library developers to add Nvidia-specific workaround code.
 
 ### Sending frames
 

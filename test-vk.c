@@ -126,40 +126,6 @@ struct PushConstants {
 VkShaderModule vertexShaderModule = VK_NULL_HANDLE;
 VkShaderModule fragmentShaderModule = VK_NULL_HANDLE;
 
-const char *vertex_shader_source =
-    "#version 330 core\n"
-    "uniform float frame;\n"
-    "layout (location = 0) in vec3 aPos;\n"
-    "layout (location = 1) in vec2 aTexCoords;\n"
-
-    "out vec2 TexCoords;\n"
-
-    "void main()\n"
-    "{\n"
-    "   float a = frame * 3.141592 / 4.;"
-    "   mat4 rot = mat4(cos(a), -sin(a), 0., 0.,\n"
-    "                   sin(a),  cos(a), 0., 0., \n"
-    "                       0.,      0., 1., 0., \n"
-    "                       0.,      0., 0., 1.);\n"
-    "   TexCoords = aTexCoords;\n"
-    "   vec4 pos = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
-    "   pos = vec4(0.1,0.1,0.1,1.0) * pos;\n"
-    "   pos += vec4(0.5,0.5,0.0,0.0);\n"
-    "   gl_Position = rot * pos;\n"
-    "}";
-
-const char *fragment_shader_source = "#version 330 core\n"
-                                     "out vec4 FragColor;\n"
-
-                                     "in vec2 TexCoords;\n"
-
-                                     "uniform sampler2D Texture1;\n"
-
-                                     "void main()\n"
-                                     "{\n"
-                                     "   FragColor = vec4(1., 0., 0., 1.);\n"
-                                     "}";
-
 static void handleRegistry(void *data, struct wl_registry *registry,
                            uint32_t name, const char *interface,
                            uint32_t version);

@@ -334,6 +334,17 @@ int funnel_stream_return(struct funnel_stream *stream,
                          struct funnel_buffer *buf);
 
 /**
+ * Skip a frame for a stream
+ *
+ * This call forces at least one subsequent call to funnel_stream_dequeue()
+ * to return without a buffer. This is useful to break a thread out of
+ * that function.
+ *
+ * @param stream Stream
+ */
+int funnel_stream_skip_frame(struct funnel_stream *stream);
+
+/**
  * Get the dimensions of a Funnel buffer.
  *
  * @param buf Buffer

@@ -1198,6 +1198,11 @@ int funnel_stream_dequeue(struct funnel_stream *stream,
         if (!stream->active)
             UNLOCK_RETURN(-ESHUTDOWN);
 
+        if (stream->skip_frames) {
+            stream->skip_frames--;
+            UNLOCK_RETURN(0);
+        }
+
         state = pw_stream_get_state(stream->stream, NULL);
         if (state != PW_STREAM_STATE_STREAMING) {
             if (stream->cur.config.mode == FUNNEL_ASYNC)
@@ -1406,6 +1411,19 @@ int funnel_stream_return(struct funnel_stream *stream,
     } else {
         UNLOCK_RETURN(funnel_stream_enqueue_internal(stream, buf, false));
     }
+}
+
+int funnel_stream_skip_frame(struct funnel_stream *stream) {
+    if (!stream->stream)
+        return -EINVAL;
+
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    stream->skip_frames++;
+    pw_thread_loop_signal(ctx->loop, false);
+
+    UNLOCK_RETURN(0);
 }
 
 void funnel_buffer_get_size(struct funnel_buffer *buf, uint32_t *width,

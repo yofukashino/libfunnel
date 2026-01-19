@@ -112,6 +112,7 @@ struct funnel_stream {
     int buffers_dequeued;
     struct funnel_buffer *pending_buffer;
     bool skip_buffer;
+    int skip_frames;
 
     struct {
         struct funnel_stream_config config;

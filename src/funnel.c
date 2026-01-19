@@ -1,0 +1,951 @@
+#include "funnel.h"
+#include "funnel_internal.h"
+
+#include <asm-generic/errno-base.h>
+#include <asm-generic/errno.h>
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <libdrm/drm_fourcc.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <spa/debug/format.h>
+#include <spa/node/io.h>
+#include <spa/node/utils.h>
+#include <spa/param/props.h>
+#include <spa/param/video/raw-utils.h>
+#include <spa/pod/dynamic.h>
+#include <spa/pod/filter.h>
+#include <spa/utils/result.h>
+
+#include <gbm.h>
+#include <pipewire/pipewire.h>
+
+static struct {
+    uint32_t drm_format;
+    enum spa_video_format spa_format;
+} supported_formats[] = {
+    {
+        .drm_format = GBM_FORMAT_ARGB8888,
+        .spa_format = SPA_VIDEO_FORMAT_BGRA,
+    },
+    {
+        .drm_format = GBM_FORMAT_RGBA8888,
+        .spa_format = SPA_VIDEO_FORMAT_ABGR,
+    },
+    {
+        .drm_format = GBM_FORMAT_ABGR8888,
+        .spa_format = SPA_VIDEO_FORMAT_RGBA,
+    },
+    {
+        .drm_format = GBM_FORMAT_BGRA8888,
+        .spa_format = SPA_VIDEO_FORMAT_ARGB,
+    },
+    {
+        .drm_format = GBM_FORMAT_XRGB8888,
+        .spa_format = SPA_VIDEO_FORMAT_BGRx,
+    },
+    {
+        .drm_format = GBM_FORMAT_RGBX8888,
+        .spa_format = SPA_VIDEO_FORMAT_xBGR,
+    },
+    {
+        .drm_format = GBM_FORMAT_XBGR8888,
+        .spa_format = SPA_VIDEO_FORMAT_RGBx,
+    },
+    {
+        .drm_format = GBM_FORMAT_BGRX8888,
+        .spa_format = SPA_VIDEO_FORMAT_xRGB,
+    },
+};
+
+///////////////////////////////////////////////
+
+static void free_params(const struct spa_pod **params, size_t count) {
+    for (size_t i = 0; i < count; i++)
+        free((void *)params[i]);
+}
+
+static int build_formats(struct funnel_stream *stream, bool fixate,
+                         const struct spa_pod **params);
+
+static void on_core_error(void *data, uint32_t id, int seq, int res,
+                          const char *message) {
+    struct funnel_ctx *ctx = data;
+
+    pw_log_error("error id:%u seq:%d res:%d (%s): %s", id, seq, res,
+                 spa_strerror(res), message);
+
+    if (id == PW_ID_CORE) {
+        ctx->dead = true;
+    }
+}
+
+static const struct pw_core_events core_events = {
+    PW_VERSION_CORE_EVENTS,
+    .error = on_core_error,
+};
+
+static void on_add_buffer(void *data, struct pw_buffer *pwbuffer) {
+    struct funnel_stream *stream = data;
+
+    int flags = GBM_BO_USE_RENDERING;
+
+    fprintf(stderr, "on_add_buffer: %p\n", pwbuffer);
+
+    struct spa_data *spa_data = pwbuffer->buffer->datas;
+    assert(spa_data[0].type & (1 << SPA_DATA_DmaBuf));
+
+    struct gbm_bo *bo = NULL;
+
+    bo = gbm_bo_create_with_modifiers2(stream->gbm, stream->cur.width,
+                                       stream->cur.height, stream->cur.format,
+                                       &stream->cur.modifier, 1, flags);
+
+    assert(bo);
+
+    struct funnel_buffer *buffer = malloc(sizeof(struct funnel_buffer));
+    buffer->pw_buffer = pwbuffer;
+    buffer->stream = stream;
+    buffer->bo = bo;
+
+    for (int i = 0; i < ARRAY_SIZE(buffer->fds); i++) {
+        buffer->fds[i] = -1;
+    }
+
+    pwbuffer->user_data = buffer;
+
+    for (int i = 0; i < stream->cur.plane_count; ++i) {
+        spa_data[i].type = SPA_DATA_DmaBuf;
+        spa_data[i].flags = SPA_DATA_FLAG_READWRITE;
+        spa_data[i].mapoffset = 0;
+        spa_data[i].maxsize =
+            i == 0 ? stream->cur.strides[i] * stream->cur.height : 0;
+        spa_data[i].fd = buffer->fds[i] = gbm_bo_get_fd(bo);
+        spa_data[i].data = NULL;
+        spa_data[i].chunk->offset = stream->cur.offsets[i];
+        spa_data[i].chunk->size = spa_data[i].maxsize;
+        spa_data[i].chunk->stride = stream->cur.strides[i];
+        spa_data[i].chunk->flags = SPA_CHUNK_FLAG_NONE;
+    };
+
+    if (stream->funcs)
+        stream->funcs->alloc_buffer(buffer);
+}
+
+static void funnel_buffer_free(struct funnel_buffer *buffer) {
+    struct funnel_stream *stream = buffer->stream;
+    if (stream->funcs)
+        stream->funcs->free_buffer(buffer);
+
+    gbm_bo_destroy(buffer->bo);
+    for (int i = 0; i < ARRAY_SIZE(buffer->fds); i++) {
+        if (buffer->fds[i] >= 0)
+            close(buffer->fds[i]);
+    }
+
+    free(buffer);
+}
+
+static void on_remove_buffer(void *data, struct pw_buffer *pwbuffer) {
+    fprintf(stderr, "on_remove_buffer: %p\n", pwbuffer);
+
+    if (pwbuffer->user_data) {
+        struct funnel_buffer *buffer = pwbuffer->user_data;
+
+        if (!buffer->dequeued) {
+            funnel_buffer_free(buffer);
+        } else {
+            buffer->pw_buffer = NULL;
+            fprintf(stderr, "defer buffer free: %p\n", buffer);
+        }
+
+        pwbuffer->user_data = NULL;
+    }
+}
+
+static void enable_timeouts(struct funnel_stream *stream, bool enabled) {
+    struct timespec timeout, interval, *to, *iv;
+
+    if (!enabled) {
+        to = iv = NULL;
+    } else {
+        timeout.tv_sec = 0;
+        timeout.tv_nsec = 1;
+        interval.tv_sec = 0;
+        interval.tv_nsec = 16 * SPA_NSEC_PER_MSEC;
+        to = &timeout;
+        iv = &interval;
+    }
+    pw_loop_update_timer(pw_thread_loop_get_loop(stream->ctx->loop),
+                         stream->timer, to, iv, false);
+}
+
+static void on_state_changed(void *data, enum pw_stream_state old,
+                             enum pw_stream_state state,
+                             const char *error_message) {
+    struct funnel_stream *stream = data;
+
+    fprintf(stderr, "on_state_changed: %s -> %s %s\n",
+            pw_stream_state_as_string(old), pw_stream_state_as_string(state),
+            error_message);
+    switch (state) {
+    case PW_STREAM_STATE_ERROR:
+        fprintf(stderr, "PW_STREAM_STATE_ERROR\n");
+        break;
+    case PW_STREAM_STATE_PAUSED:
+        fprintf(stderr, "PW_STREAM_STATE_PAUSED\n");
+        enable_timeouts(stream, false);
+        break;
+    case PW_STREAM_STATE_STREAMING:
+        fprintf(stderr, "PW_STREAM_STATE_STREAMING\n");
+        printf("driving:%d lazy:%d\n", pw_stream_is_driving(stream->stream),
+               pw_stream_is_lazy(stream->stream));
+        if (pw_stream_is_driving(stream->stream) !=
+            pw_stream_is_lazy(stream->stream)) {
+            enable_timeouts(stream, true);
+        }
+        break;
+    case PW_STREAM_STATE_CONNECTING:
+        fprintf(stderr, "PW_STREAM_STATE_CONNECTING\n");
+        break;
+    case PW_STREAM_STATE_UNCONNECTED:
+        fprintf(stderr, "PW_STREAM_STATE_UNCONNECTED\n");
+        break;
+    }
+}
+
+static bool test_create_dmabuf(struct funnel_stream *stream, uint32_t format,
+                               uint64_t *modifiers, size_t num_modifiers) {
+    int flags = GBM_BO_USE_RENDERING;
+
+    struct gbm_bo *bo;
+
+    bo = gbm_bo_create_with_modifiers2(stream->gbm,
+                                       stream->cur.video_format.size.width,
+                                       stream->cur.video_format.size.height,
+                                       format, modifiers, num_modifiers, flags);
+    if (!bo)
+        return false;
+
+    stream->cur.width = gbm_bo_get_width(bo);
+    stream->cur.height = gbm_bo_get_height(bo);
+    assert(stream->cur.width == stream->cur.video_format.size.width);
+    assert(stream->cur.height == stream->cur.video_format.size.height);
+    stream->cur.plane_count = gbm_bo_get_plane_count(bo);
+    fprintf(stderr, "planes: %d\n", stream->cur.plane_count);
+    for (int i = 0; i < stream->cur.plane_count; i++) {
+        stream->cur.strides[i] = gbm_bo_get_stride_for_plane(bo, i);
+        stream->cur.offsets[i] = gbm_bo_get_offset(bo, i);
+    }
+    stream->cur.format = gbm_bo_get_format(bo);
+    stream->cur.modifier = gbm_bo_get_modifier(bo);
+
+    gbm_bo_destroy(bo);
+
+    return true;
+}
+
+static void on_param_changed(void *data, uint32_t id,
+                             const struct spa_pod *format) {
+    fprintf(stderr, "on_param_changed: %d %p\n", id, format);
+
+    struct funnel_stream *stream = data;
+
+    if (!format || id != SPA_PARAM_Format) {
+        fprintf(stderr, " ->ignored\n");
+        return;
+    }
+
+    int i;
+    uint32_t dmabuf_format;
+
+    spa_format_video_raw_parse(format, &stream->cur.video_format);
+
+    for (i = 0; i < ARRAY_SIZE(supported_formats); i++) {
+        if (supported_formats[i].spa_format ==
+            stream->cur.video_format.format) {
+            dmabuf_format = supported_formats[i].drm_format;
+            break;
+        }
+    }
+    if (i >= ARRAY_SIZE(supported_formats)) {
+        pw_log_error("unsupported format %d", stream->cur.video_format.format);
+        return;
+    }
+
+    const struct spa_pod_prop *mod_prop =
+        spa_pod_find_prop(format, NULL, SPA_FORMAT_VIDEO_modifier);
+
+    assert(mod_prop);
+
+    const uint32_t value_count = SPA_POD_CHOICE_N_VALUES(&mod_prop->value);
+    const uint64_t *values = (uint64_t *)SPA_POD_CHOICE_VALUES(
+        &mod_prop->value); // values[0] is the preferred choice
+
+    int mod_count = 0;
+    uint64_t *modifiers = malloc(value_count * sizeof(uint64_t));
+
+    for (int i = 0; i < value_count; i++) {
+        bool found = false;
+        for (int j = 0; j < mod_count; j++) {
+            if (values[i] == modifiers[j]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            modifiers[mod_count++] = values[i];
+        }
+    }
+
+    if (mod_count > 1) {
+        for (int j = 0; j < mod_count; j++) {
+            if (modifiers[j] == DRM_FORMAT_MOD_INVALID) {
+                mod_count--;
+                memmove(&modifiers[j], &modifiers[j + 1], mod_count - j);
+                break;
+            }
+        }
+    }
+
+    if (stream->cur.width != stream->cur.video_format.size.width ||
+        stream->cur.height != stream->cur.video_format.size.height ||
+        stream->cur.format != dmabuf_format) {
+
+        if (!test_create_dmabuf(stream, dmabuf_format, modifiers, mod_count)) {
+            pw_log_error("failed to create dmabuf for format 0x%x",
+                         dmabuf_format);
+            return;
+        }
+
+        fprintf(stderr, "Created buffer with format 0x%x and modifier 0x%llx\n",
+                stream->cur.format, (long long)stream->cur.modifier);
+
+        size_t num_formats =
+            pw_array_get_len(&stream->cur.config.formats, struct funnel_format);
+
+        const struct spa_pod **params =
+            calloc(num_formats + 1, sizeof(struct spa_pod *));
+
+        int num_params = build_formats(stream, true, params);
+        assert(num_params <= (num_formats + 1));
+
+        stream->cur.ready = false;
+        pw_stream_update_params(stream->stream, params, num_params);
+        free_params(params, num_params);
+        return;
+    }
+
+    const int buffertypes = (1 << SPA_DATA_DmaBuf);
+
+    spa_auto(spa_pod_dynamic_builder) pod_builder = {0};
+    struct spa_pod_frame f;
+    spa_pod_dynamic_builder_init(&pod_builder, NULL, 0, 1024);
+
+    int num_params = 0;
+    const struct spa_pod *params[8];
+
+    // Fallback buffer parameters for DmaBuf with implicit sync or MemFd
+    spa_pod_builder_push_object(
+        &pod_builder.b, &f, SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers);
+    spa_pod_builder_add(
+        &pod_builder.b, SPA_PARAM_BUFFERS_buffers,
+        SPA_POD_CHOICE_RANGE_Int(stream->cur.config.buffers.def,
+                                 stream->cur.config.buffers.min,
+                                 stream->cur.config.buffers.max),
+        SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int(buffertypes), 0);
+    spa_pod_builder_add(&pod_builder.b, SPA_PARAM_BUFFERS_blocks,
+                        SPA_POD_Int(stream->cur.plane_count), 0);
+    params[num_params++] =
+        (struct spa_pod *)spa_pod_builder_pop(&pod_builder.b, &f);
+
+    params[num_params++] = (struct spa_pod *)spa_pod_builder_add_object(
+        &pod_builder.b, SPA_TYPE_OBJECT_ParamMeta, SPA_PARAM_Meta,
+        SPA_PARAM_META_type, SPA_POD_Id(SPA_META_Header), SPA_PARAM_META_size,
+        SPA_POD_Int(sizeof(struct spa_meta_header)));
+
+    pw_stream_update_params(stream->stream, params, num_params);
+    stream->cur.ready = true;
+}
+
+static void on_command(void *data, const struct spa_command *command) {
+    struct funnel_stream *stream = data;
+
+    switch (SPA_NODE_COMMAND_ID(command)) {
+    case SPA_NODE_COMMAND_RequestProcess:
+        fprintf(stderr, "%p trigger", stream);
+        pw_stream_trigger_process(stream->stream);
+        break;
+    default:
+        break;
+    }
+}
+
+static void on_process(void *data) {
+    // struct funnel_stream *stream = data;
+
+    static int frame = 0;
+    fprintf(stderr, "process %d\n", frame++);
+}
+
+static const struct pw_stream_events stream_events = {
+    PW_VERSION_STREAM_EVENTS,
+    .add_buffer = on_add_buffer,
+    .remove_buffer = on_remove_buffer,
+    .state_changed = on_state_changed,
+    .param_changed = on_param_changed,
+    .command = on_command,
+    .process = on_process,
+};
+
+static void on_timeout(void *userdata, uint64_t expirations) {
+    struct funnel_stream *stream = userdata;
+
+    pw_stream_trigger_process(stream->stream);
+}
+
+static struct spa_pod *
+build_format(enum spa_video_format format, struct spa_rectangle *resolution,
+             struct spa_fraction *def_rate, struct spa_fraction *min_rate,
+             struct spa_fraction *max_rate, const uint64_t *modifiers,
+             size_t num_modifiers, uint32_t modifiers_flags) {
+    struct spa_pod_frame f[2];
+
+    struct spa_pod_dynamic_builder pod_builder;
+    spa_pod_dynamic_builder_init(&pod_builder, NULL, 0, 1024);
+    struct spa_pod_builder *b = &pod_builder.b;
+
+    spa_pod_builder_push_object(b, &f[0], SPA_TYPE_OBJECT_Format,
+                                SPA_PARAM_EnumFormat);
+    spa_pod_builder_add(b, SPA_FORMAT_mediaType,
+                        SPA_POD_Id(SPA_MEDIA_TYPE_video), 0);
+    spa_pod_builder_add(b, SPA_FORMAT_mediaSubtype,
+                        SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw), 0);
+    spa_pod_builder_add(b, SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle(resolution),
+                        0);
+    spa_pod_builder_add(b, SPA_FORMAT_VIDEO_framerate,
+                        SPA_POD_Fraction(&SPA_FRACTION(0, 1)), 0);
+    spa_pod_builder_add(
+        b, SPA_FORMAT_VIDEO_maxFramerate,
+        SPA_POD_CHOICE_RANGE_Fraction(def_rate, min_rate, max_rate), 0);
+
+    spa_pod_builder_add(b, SPA_FORMAT_VIDEO_format, SPA_POD_Id(format), 0);
+
+    if (num_modifiers) {
+        spa_pod_builder_prop(b, SPA_FORMAT_VIDEO_modifier, modifiers_flags);
+        spa_pod_builder_push_choice(b, &f[1], SPA_CHOICE_Enum, 0);
+
+        for (size_t i = 0; i < num_modifiers; i++) {
+            spa_pod_builder_long(b, modifiers[i]);
+            if (i == 0) {
+                spa_pod_builder_long(b, modifiers[i]);
+            }
+        }
+        spa_pod_builder_pop(b, &f[1]);
+    }
+    return (struct spa_pod *)spa_pod_builder_pop(b, &f[0]);
+}
+
+static int build_formats(struct funnel_stream *stream, bool fixate,
+                         const struct spa_pod **params) {
+    struct funnel_stream_config *config = &stream->cur.config;
+
+    struct spa_fraction def_rate = to_spa_fraction(config->rate.def);
+    struct spa_fraction min_rate = to_spa_fraction(config->rate.min);
+    struct spa_fraction max_rate = to_spa_fraction(config->rate.max);
+
+    struct spa_rectangle resolution =
+        SPA_RECTANGLE(config->width, config->height);
+
+    int num_params = 0;
+    if (fixate) {
+        num_params++;
+        *params++ = build_format(
+            stream->cur.video_format.format, &resolution, &def_rate, &min_rate,
+            &max_rate, &stream->cur.modifier, 1, SPA_POD_PROP_FLAG_MANDATORY);
+    }
+
+    struct funnel_format *format;
+    pw_array_for_each (format, &config->formats) {
+        num_params++;
+        *params++ = build_format(
+            format->spa_format, &resolution, &def_rate, &min_rate, &max_rate,
+            format->modifiers, format->num_modifiers,
+            SPA_POD_PROP_FLAG_MANDATORY | SPA_POD_PROP_FLAG_DONT_FIXATE);
+    }
+
+    return num_params;
+}
+
+int funnel_init(struct funnel_ctx **pctx) {
+    struct funnel_ctx *ctx;
+
+    *pctx = NULL;
+    ctx = calloc(1, sizeof(*ctx));
+    assert(ctx);
+
+    pw_init(NULL, NULL);
+
+    ctx->loop = pw_thread_loop_new("funnel_loop", NULL);
+    assert(ctx->loop);
+
+    pw_thread_loop_lock(ctx->loop);
+
+    pw_thread_loop_start(ctx->loop);
+
+    ctx->context = pw_context_new(pw_thread_loop_get_loop(ctx->loop), NULL, 0);
+    assert(ctx->context);
+
+    if ((ctx->core = pw_context_connect(ctx->context, NULL, 0)) == NULL) {
+        pw_log_error("failed to connect to PipeWire");
+        pw_thread_loop_unlock(ctx->loop);
+        funnel_shutdown(ctx);
+        return -ECONNREFUSED;
+    }
+
+    pw_core_add_listener(ctx->core, &ctx->core_listener, &core_events, ctx);
+
+    pw_thread_loop_unlock(ctx->loop);
+
+    *pctx = ctx;
+    return 0;
+}
+
+void funnel_shutdown(struct funnel_ctx *ctx) {
+    if (!ctx)
+        return;
+
+    assert(ctx->loop);
+
+    /* Thread loop should be unlocked here */
+    pw_thread_loop_stop(ctx->loop);
+
+    if (ctx->core)
+        pw_core_disconnect(ctx->core);
+
+    if (ctx->context)
+        pw_context_destroy(ctx->context);
+
+    pw_thread_loop_destroy(ctx->loop);
+
+    free(ctx);
+    pw_deinit();
+}
+
+int funnel_stream_create(struct funnel_ctx *ctx, const char *name,
+                         struct funnel_stream **pstream) {
+    struct funnel_stream *stream;
+    assert(ctx);
+
+    pw_thread_loop_lock(ctx->loop);
+
+    if (ctx->dead)
+        UNLOCK_RETURN(-EIO);
+
+    *pstream = NULL;
+    stream = calloc(1, sizeof(*stream));
+    assert(stream);
+
+    stream->ctx = ctx;
+    stream->name = strdup(name);
+
+    stream->config.buffers.def = 2;
+    stream->config.buffers.min = 2;
+    stream->config.buffers.max = 3;
+
+    stream->config.rate.def = FUNNEL_RATE_VARIABLE;
+    stream->config.rate.min = FUNNEL_RATE_VARIABLE;
+    stream->config.rate.max = FUNNEL_RATE_VARIABLE;
+
+    stream->config_pending = true;
+
+    pw_array_init(&stream->config.formats, 32);
+    pw_array_init(&stream->cur.config.formats, 32);
+
+    stream->timer = pw_loop_add_timer(pw_thread_loop_get_loop(ctx->loop),
+                                      on_timeout, stream);
+    assert(stream->timer);
+
+    *pstream = stream;
+
+    UNLOCK_RETURN(0);
+}
+
+int funnel_stream_init_gbm(struct funnel_stream *stream, int gbm_fd) {
+    if (stream->gbm)
+        return -EEXIST;
+
+    if (stream->api != API_UNSET)
+        return -EEXIST;
+
+    stream->gbm = gbm_create_device(gbm_fd);
+    if (!stream->gbm)
+        return -EINVAL;
+
+    stream->api = API_GBM;
+    return 0;
+}
+
+/**
+ * Add a supported GBM format. Must be called in preference order (highest to
+ * lowest).
+ *
+ * @param stream Stream
+ * @param format DRM format (FOURCC)
+ * @param modifiers Pointer to a list of modifiers (borrow)
+ * @param num_modifiers Number of modifiers passed
+ */
+int funnel_stream_gbm_add_format(struct funnel_stream *stream, uint32_t format,
+                                 uint64_t *modifiers, size_t num_modifiers) {
+    int i;
+    enum spa_video_format spa_format;
+
+    if (!num_modifiers)
+        return -EINVAL;
+
+    for (i = 0; i < ARRAY_SIZE(supported_formats); i++) {
+        if (supported_formats[i].drm_format == format) {
+            spa_format = supported_formats[i].spa_format;
+            break;
+        }
+    }
+    if (i >= ARRAY_SIZE(supported_formats)) {
+        return -ENOTSUP;
+    }
+
+    struct funnel_format *fmt =
+        pw_array_add(&stream->config.formats, sizeof(struct funnel_format));
+    assert(fmt);
+
+    fmt->format = format;
+    fmt->spa_format = spa_format;
+    fmt->modifiers = calloc(num_modifiers, sizeof(uint64_t));
+    fmt->num_modifiers = num_modifiers;
+    memcpy(fmt->modifiers, modifiers, num_modifiers * sizeof(uint64_t));
+    fprintf(stderr, "modifiers=%p fmt=%p base=%p\n", fmt->modifiers, fmt,
+            stream->config.formats.data);
+
+    stream->config_pending = true;
+    return 0;
+}
+
+static void funnel_reset_formats(struct pw_array *formats) {
+    struct funnel_format *format;
+
+    pw_array_for_each (format, formats) {
+        free(format->modifiers);
+    }
+    pw_array_reset(formats);
+}
+
+static void funnel_free_formats(struct pw_array *formats) {
+    funnel_reset_formats(formats);
+    pw_array_clear(formats);
+}
+
+void funnel_stream_clear_formats(struct funnel_stream *stream) {
+    funnel_reset_formats(&stream->config.formats);
+}
+
+static void funnel_copy_formats(struct pw_array *dst, struct pw_array *src) {
+    struct funnel_format *sfmt;
+
+    funnel_reset_formats(dst);
+
+    pw_array_for_each (sfmt, src) {
+        struct funnel_format *fmt =
+            pw_array_add(dst, sizeof(struct funnel_format));
+        assert(fmt);
+        fprintf(stderr, "fmt %p <- %p [%x %zd]\n", fmt, sfmt, sfmt->format,
+                sfmt->num_modifiers);
+
+        fmt->format = sfmt->format;
+        fmt->spa_format = sfmt->spa_format;
+        fmt->modifiers = calloc(sfmt->num_modifiers, sizeof(uint64_t));
+        fmt->num_modifiers = sfmt->num_modifiers;
+        memcpy(fmt->modifiers, sfmt->modifiers,
+               sfmt->num_modifiers * sizeof(uint64_t));
+    }
+}
+
+int funnel_stream_set_buffers(struct funnel_stream *stream, int def, int min,
+                              int max) {
+    if (def < 1 || min < 1 || max < 1 || def > max || def < min || min > max)
+        return -EINVAL;
+
+    stream->config.buffers.def = def;
+    stream->config.buffers.min = min;
+    stream->config.buffers.max = max;
+    stream->config_pending = true;
+
+    return 0;
+}
+
+int funnel_stream_set_size(struct funnel_stream *stream, uint32_t width,
+                           uint32_t height) {
+    assert(stream);
+
+    if (!width || !height)
+        return -EINVAL;
+
+    stream->config.width = width;
+    stream->config.height = height;
+    stream->config_pending = true;
+
+    return 0;
+}
+
+int funnel_stream_set_rate(struct funnel_stream *stream,
+                           struct funnel_fraction def,
+                           struct funnel_fraction min,
+                           struct funnel_fraction max) {
+    if (!def.den || !min.den || !max.den)
+        return -EINVAL;
+
+    stream->config.rate.def = def;
+    stream->config.rate.min = min;
+    stream->config.rate.max = max;
+    stream->config_pending = true;
+
+    return 0;
+}
+
+int funnel_stream_get_rate(struct funnel_stream *stream,
+                           struct funnel_fraction *rate) {
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    if (!stream->cur.ready) {
+        *rate = FUNNEL_FRACTION(0, 0);
+        UNLOCK_RETURN(-EINPROGRESS);
+    }
+
+    rate->num = stream->cur.video_format.framerate.num;
+    rate->den = stream->cur.video_format.framerate.denom;
+
+    UNLOCK_RETURN(0);
+}
+
+int funnel_stream_configure(struct funnel_stream *stream) {
+    struct funnel_ctx *ctx = stream->ctx;
+
+    if (!stream->config_pending)
+        return 0;
+
+    if (stream->api == API_UNSET) {
+        pw_log_error("funnel_stream_set_size() must be called before "
+                     "funnel_stream_configure()");
+    }
+
+    if (!stream->config.width || !stream->config.width) {
+        pw_log_error("funnel_stream_set_size() must be called before "
+                     "funnel_stream_configure()");
+        return -EINVAL;
+    }
+
+    size_t num_formats =
+        pw_array_get_len(&stream->config.formats, struct funnel_format);
+
+    if (!num_formats) {
+        pw_log_error("no formats configured");
+        return -EINVAL;
+    }
+
+    pw_thread_loop_lock(ctx->loop);
+
+    if (ctx->dead)
+        UNLOCK_RETURN(-EIO);
+
+    bool new_stream = false;
+    if (!stream->stream) {
+        new_stream = true;
+
+        struct pw_properties *props;
+        // clang-format off
+        props = pw_properties_new(
+            PW_KEY_MEDIA_TYPE, "Video",
+            PW_KEY_MEDIA_CLASS, "Stream/Output/Video",
+            PW_KEY_NODE_SUPPORTS_LAZY,"1",
+            PW_KEY_NODE_SUPPORTS_REQUEST, "1",
+            NULL
+        );
+        // clang-format on
+        assert(props);
+
+        stream->stream = pw_stream_new(ctx->core, stream->name, props);
+        assert(stream->stream);
+
+        pw_stream_add_listener(stream->stream, &stream->stream_listener,
+                               &stream_events, stream);
+    }
+
+    funnel_free_formats(&stream->cur.config.formats);
+    stream->cur.config = stream->config;
+    pw_array_init(&stream->cur.config.formats, 32);
+    funnel_copy_formats(&stream->cur.config.formats, &stream->config.formats);
+
+    enum pw_stream_flags flags =
+        PW_STREAM_FLAG_ALLOC_BUFFERS | PW_STREAM_FLAG_DRIVER;
+
+    const struct spa_pod **params =
+        calloc(num_formats, sizeof(struct spa_pod *));
+
+    int num_params = build_formats(stream, false, params);
+    assert(num_params <= num_formats);
+
+    if (!new_stream) {
+        stream->cur.ready = false;
+        pw_stream_update_params(stream->stream, params, num_params);
+    } else if (pw_stream_connect(stream->stream, PW_DIRECTION_OUTPUT,
+                                 SPA_ID_INVALID, flags, params,
+                                 num_params) != 0) {
+        free_params(params, num_params);
+        pw_log_error("failed to connect to stream");
+        pw_stream_destroy(stream->stream);
+        stream->stream = NULL;
+        UNLOCK_RETURN(-EIO);
+    }
+
+    free_params(params, num_params);
+
+    stream->config_pending = false;
+
+    UNLOCK_RETURN(0);
+}
+
+int funnel_buffer_get_gbm_bo(struct funnel_buffer *buf, struct gbm_bo **bo) {
+    assert(buf->bo);
+    *bo = buf->bo;
+    return 0;
+}
+
+int funnel_stream_start(struct funnel_stream *stream) {
+    int ret = funnel_stream_configure(stream);
+    if (ret)
+        return ret;
+
+    assert(stream->stream);
+
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    if (ctx->dead)
+        UNLOCK_RETURN(-EIO);
+
+    UNLOCK_RETURN(pw_stream_set_active(stream->stream, true));
+}
+
+int funnel_stream_stop(struct funnel_stream *stream) {
+    if (!stream->stream)
+        return -EINVAL;
+
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    if (ctx->dead)
+        UNLOCK_RETURN(-EIO);
+
+    UNLOCK_RETURN(pw_stream_set_active(stream->stream, false));
+}
+
+void funnel_stream_destroy(struct funnel_stream *stream) {
+    if (!stream)
+        return;
+
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    if (stream->gbm)
+        gbm_device_destroy(stream->gbm);
+
+    funnel_free_formats(&stream->config.formats);
+    funnel_free_formats(&stream->cur.config.formats);
+
+    if (stream->stream) {
+        spa_hook_remove(&stream->stream_listener);
+        pw_stream_disconnect(stream->stream);
+        pw_stream_destroy(stream->stream);
+    }
+
+    if (stream->timer) {
+        pw_loop_destroy_source(pw_thread_loop_get_loop(stream->ctx->loop),
+                               stream->timer);
+    }
+
+    pw_thread_loop_unlock(ctx->loop);
+
+    free((void *)stream->name);
+    free(stream);
+}
+
+int funnel_stream_dequeue(struct funnel_stream *stream,
+                          struct funnel_buffer **pbuf) {
+    if (!stream->stream)
+        return -EINVAL;
+
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    *pbuf = NULL;
+    struct pw_buffer *pwbuffer = pw_stream_dequeue_buffer(stream->stream);
+    if (!pwbuffer)
+        UNLOCK_RETURN(0);
+
+    struct funnel_buffer *buf = pwbuffer->user_data;
+    assert(!buf->dequeued);
+    buf->dequeued = true;
+
+    *pbuf = buf;
+
+    UNLOCK_RETURN(0);
+}
+int funnel_stream_enqueue(struct funnel_stream *stream,
+                          struct funnel_buffer *buf) {
+    if (!stream->stream)
+        return -EINVAL;
+
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    assert(buf->dequeued);
+    buf->dequeued = false;
+    if (!buf->pw_buffer) {
+        funnel_buffer_free(buf);
+        UNLOCK_RETURN(-ESTALE);
+    }
+
+    int ret = pw_stream_queue_buffer(stream->stream, buf->pw_buffer);
+
+    UNLOCK_RETURN(ret);
+}
+
+int funnel_stream_return(struct funnel_stream *stream,
+                         struct funnel_buffer *buf) {
+    if (!stream->stream)
+        return -EINVAL;
+
+    struct funnel_ctx *ctx = stream->ctx;
+    pw_thread_loop_lock(ctx->loop);
+
+    assert(buf->dequeued);
+    buf->dequeued = false;
+    if (!buf->pw_buffer) {
+        funnel_buffer_free(buf);
+        UNLOCK_RETURN(-ESTALE);
+    }
+
+    int ret = pw_stream_return_buffer(stream->stream, buf->pw_buffer);
+
+    UNLOCK_RETURN(ret);
+}
+
+void funnel_buffer_get_size(struct funnel_buffer *buf, uint32_t *width,
+                            uint32_t *height) {
+    *width = gbm_bo_get_width(buf->bo);
+    *height = gbm_bo_get_height(buf->bo);
+}

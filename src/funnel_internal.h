@@ -1,0 +1,104 @@
+#pragma once
+
+#include "funnel.h"
+#include <gbm.h>
+#include <pipewire/pipewire.h>
+#include <spa/param/video/raw-utils.h>
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
+
+#define UNLOCK_RETURN(ret)                                                     \
+    do {                                                                       \
+        int _ret = ret;                                                        \
+        pw_thread_loop_unlock(ctx->loop);                                      \
+        return _ret;                                                           \
+    } while (0)
+
+static inline struct spa_fraction to_spa_fraction(struct funnel_fraction frac) {
+    return SPA_FRACTION(frac.num, frac.den);
+}
+
+struct funnel_ctx {
+    bool dead;
+    struct pw_thread_loop *loop;
+    struct pw_core *core;
+    struct pw_context *context;
+    struct spa_hook core_listener;
+};
+
+struct funnel_format {
+    uint32_t format;
+    enum spa_video_format spa_format;
+    uint64_t *modifiers;
+    size_t num_modifiers;
+};
+
+struct funnel_stream_config {
+    struct {
+        int def, min, max;
+    } buffers;
+
+    struct {
+        struct funnel_fraction def, min, max;
+    } rate;
+
+    uint32_t width;
+    uint32_t height;
+
+    struct pw_array formats;
+};
+
+enum funnel_api {
+    API_UNSET = 0,
+    API_GBM,
+    API_EGL,
+    API_VULKAN,
+};
+
+struct funnel_stream_funcs {
+    void (*alloc_buffer)(struct funnel_buffer *);
+    void (*free_buffer)(struct funnel_buffer *);
+};
+
+struct funnel_stream {
+    struct funnel_ctx *ctx;
+    const char *name;
+    enum funnel_api api;
+
+    const struct funnel_stream_funcs *funcs;
+    void *api_ctx;
+
+    struct gbm_device *gbm;
+    struct spa_hook stream_listener;
+    struct pw_stream *stream;
+    struct spa_source *timer;
+
+    struct funnel_stream_config config;
+    bool config_pending;
+
+    uint32_t cur_format;
+    uint64_t cur_modifier;
+
+    struct {
+        struct funnel_stream_config config;
+        bool ready;
+        struct spa_video_info_raw video_format;
+
+        uint32_t plane_count;
+        uint32_t width;
+        uint32_t height;
+        uint32_t format;
+        uint64_t modifier;
+        uint32_t strides[4];
+        uint32_t offsets[4];
+    } cur;
+};
+
+struct funnel_buffer {
+    struct funnel_stream *stream;
+    struct pw_buffer *pw_buffer;
+    bool dequeued;
+    struct gbm_bo *bo;
+    int fds[6];
+    void *api_buf;
+};

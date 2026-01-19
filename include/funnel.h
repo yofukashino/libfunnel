@@ -31,7 +31,7 @@ typedef void (*funnel_buffer_callback)(void *opaque,
                                        struct funnel_buffer *buf);
 
 /**
- * Synchronization modes for the frame transfer
+ * Synchronization modes for the frame pacing
  */
 enum funnel_mode {
     /**
@@ -104,7 +104,7 @@ enum funnel_mode {
      * the PipeWire graph will be blocked while the buffer
      * is dequeued. It adds no latency.
      */
-    FUNNEL_SYNC,
+    FUNNEL_SYNCHRONOUS,
 };
 
 /**

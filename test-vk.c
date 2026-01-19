@@ -615,7 +615,7 @@ int main(int argc, char **argv) {
     } else if (argc > 1 && !strcmp(argv[1], "-double")) {
         mode = FUNNEL_DOUBLE_BUFFERED;
     } else if (argc > 1 && !strcmp(argv[1], "-sync")) {
-        mode = FUNNEL_SYNC;
+        mode = FUNNEL_SYNCHRONOUS;
     }
 
     CHECK_WL_RESULT(display = wl_display_connect(NULL));

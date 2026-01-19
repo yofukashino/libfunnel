@@ -59,7 +59,7 @@ funnel_stream_set_size(stream, width, height);
 // FUNNEL_DOUBLE_BUFFERED if you are rendering frames mainly for sharing
 //                        and the frame rate is set by the consumer,
 // FUNNEL_SINGLE_BUFFERED same but with lower latency,
-// FUNNEL_SYNC            if you are just copying frames out of somewhere
+// FUNNEL_SYNCHRONOUS     if you are just copying frames out of somewhere
 //                        else on demand (like a Spout2 texture written by
 //                        another process) and want zero added latency.
 funnel_stream_set_mode(stream, FUNNEL_ASYNC);

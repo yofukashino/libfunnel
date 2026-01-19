@@ -463,7 +463,7 @@ static void on_process(void *data) {
     if (!stream->active)
         return;
 
-    if (stream->cur.config.mode == FUNNEL_SYNC) {
+    if (stream->cur.config.mode == FUNNEL_SYNCHRONOUS) {
         // Sync mode handshake
         if (stream->cycle_state == SYNC_CYCLE_WAITING) {
             stream->cycle_state = SYNC_CYCLE_ACTIVE;
@@ -806,7 +806,7 @@ int funnel_stream_set_mode(struct funnel_stream *stream,
         stream->config.buffers.max = 8;
         break;
     case FUNNEL_SINGLE_BUFFERED:
-    case FUNNEL_SYNC:
+    case FUNNEL_SYNCHRONOUS:
         stream->config.buffers.def = 4;
         stream->config.buffers.min = 3;
         stream->config.buffers.max = 8;
@@ -891,7 +891,7 @@ int funnel_stream_configure(struct funnel_stream *stream) {
         break;
     case FUNNEL_DOUBLE_BUFFERED:
     case FUNNEL_SINGLE_BUFFERED:
-    case FUNNEL_SYNC:
+    case FUNNEL_SYNCHRONOUS:
         lazy = true;
         break;
     }
@@ -1087,7 +1087,7 @@ int funnel_stream_dequeue(struct funnel_stream *stream,
             continue;
         }
 
-        if (stream->cur.config.mode == FUNNEL_SYNC &&
+        if (stream->cur.config.mode == FUNNEL_SYNCHRONOUS &&
             stream->cycle_state != SYNC_CYCLE_ACTIVE) {
             /*
              * Tell the process callback that we are ready to start processing
@@ -1180,7 +1180,7 @@ static int funnel_stream_enqueue_internal(struct funnel_stream *stream,
         break;
     }
 
-    if (stream->cur.config.mode == FUNNEL_SYNC &&
+    if (stream->cur.config.mode == FUNNEL_SYNCHRONOUS &&
         stream->cycle_state != SYNC_CYCLE_ACTIVE) {
         fprintf(stderr, "enqueue: Aborted sync cycle, dropping buffer\n");
         UNLOCK_RETURN(-ESTALE);

@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "-double"))
         mode = FUNNEL_DOUBLE_BUFFERED;
     if (argc > 1 && !strcmp(argv[1], "-sync"))
-        mode = FUNNEL_SYNC;
+        mode = FUNNEL_SYNCHRONOUS;
 
     do_init(width, height);
 

@@ -84,9 +84,6 @@ void gl_setup_scene(void) {
         "#version 330 core\n"
         "uniform float frame;\n"
         "layout (location = 0) in vec3 aPos;\n"
-        "layout (location = 1) in vec2 aTexCoords;\n"
-
-        "out vec2 TexCoords;\n"
 
         "void main()\n"
         "{\n"
@@ -95,24 +92,20 @@ void gl_setup_scene(void) {
         "                   sin(a),  cos(a), 0., 0., \n"
         "                       0.,      0., 1., 0., \n"
         "                       0.,      0., 0., 1.);\n"
-        "   TexCoords = aTexCoords;\n"
         "   vec4 pos = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
         "   pos = vec4(0.1,0.1,0.1,1.0) * pos;\n"
         "   pos += vec4(0.5,0.5,0.0,0.0);\n"
         "   gl_Position = rot * pos;\n"
-        "}\0";
+        "}";
+
     const char *fragment_shader_source =
         "#version 330 core\n"
         "out vec4 FragColor;\n"
 
-        "in vec2 TexCoords;\n"
-
-        "uniform sampler2D Texture1;\n"
-
         "void main()\n"
         "{\n"
         "   FragColor = vec4(1., 0., 0., 1.);\n"
-        "}\0";
+        "}";
 
     // vertex shader
     int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
@@ -135,9 +128,7 @@ void gl_setup_scene(void) {
 
     // quad
     float vertices[] = {
-        0.f,  1.f,  0.0f, 1.0f, 0.0f, // top center
-        1.f,  -1.f, 0.0f, 1.0f, 1.0f, // bottom right
-        -1.f, -1.f, 0.0f, 0.0f, 1.0f, // bottom left
+        0.f, 1.f, 0.0f, 1.f, -1.f, 0.0f, -1.f, -1.f, 0.0f,
     };
     unsigned int indices[] = {
         0, 1, 2, // first Triangle
@@ -157,11 +148,8 @@ void gl_setup_scene(void) {
                  GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float),
                           (void *)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
-                          (void *)(3 * sizeof(float)));
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 

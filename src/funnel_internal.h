@@ -72,6 +72,9 @@ struct funnel_stream {
     struct funnel_ctx *ctx;
     const char *name;
     enum funnel_api api;
+    funnel_buffer_callback alloc_cb;
+    funnel_buffer_callback free_cb;
+    void *cb_opaque;
 
     const struct funnel_stream_funcs *funcs;
     void *api_ctx;
@@ -117,4 +120,5 @@ struct funnel_buffer {
     struct gbm_bo *bo;
     int fds[6];
     void *api_buf;
+    void *opaque;
 };

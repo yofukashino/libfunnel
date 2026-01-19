@@ -26,6 +26,10 @@ static inline struct funnel_fraction FUNNEL_FRACTION(uint32_t num,
     return (struct funnel_fraction){num, den};
 }
 
+typedef void (*funnel_buffer_callback)(void *opaque,
+                                       struct funnel_stream *stream,
+                                       struct funnel_buffer *buf);
+
 /**
  * Synchronization modes for the frame transfer
  */
@@ -126,6 +130,19 @@ void funnel_shutdown(struct funnel_ctx *ctx);
  */
 int funnel_stream_create(struct funnel_ctx *ctx, const char *name,
                          struct funnel_stream **pstream);
+
+/**
+ * Specify callbacks for buffer creation/destruction.
+ *
+ * @param stream Stream
+ * @param alloc Callback when a buffer is allocated
+ * @param free Callback when a buffer is freed
+ * @param opaque Opaque user pointer
+ */
+void funnel_stream_set_buffer_callbacks(struct funnel_stream *stream,
+                                        funnel_buffer_callback alloc,
+                                        funnel_buffer_callback free,
+                                        void *opaque);
 
 /**
  * Set the frame dimensions for a stream.
@@ -257,3 +274,18 @@ int funnel_stream_return(struct funnel_stream *stream,
  */
 void funnel_buffer_get_size(struct funnel_buffer *buf, uint32_t *pwidth,
                             uint32_t *pheight);
+
+/**
+ * Set an arbitrary user data pointer for a buffer.
+ *
+ * @param buf Buffer
+ * @param opaque Opaque user data pointer
+ */
+void funnel_buffer_set_user_data(struct funnel_buffer *buf, void *opaque);
+
+/**
+ * Get an arbitrary user data pointer for a buffer.
+ *
+ * @param buf Buffer
+ */
+void *funnel_buffer_get_user_data(struct funnel_buffer *buf);

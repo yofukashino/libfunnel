@@ -137,11 +137,16 @@ static void on_add_buffer(void *data, struct pw_buffer *pwbuffer) {
     if (stream->funcs)
         stream->funcs->alloc_buffer(buffer);
 
+    if (stream->alloc_cb)
+        stream->alloc_cb(stream->cb_opaque, stream, buffer);
+
     stream->num_buffers++;
 }
 
 static void funnel_buffer_free(struct funnel_buffer *buffer) {
     struct funnel_stream *stream = buffer->stream;
+    if (stream->free_cb)
+        stream->free_cb(stream->cb_opaque, stream, buffer);
     if (stream->funcs)
         stream->funcs->free_buffer(buffer);
 
@@ -660,6 +665,15 @@ int funnel_stream_create(struct funnel_ctx *ctx, const char *name,
     *pstream = stream;
 
     UNLOCK_RETURN(0);
+}
+
+void funnel_stream_set_buffer_callbacks(struct funnel_stream *stream,
+                                        funnel_buffer_callback alloc,
+                                        funnel_buffer_callback free,
+                                        void *opaque) {
+    stream->alloc_cb = alloc;
+    stream->free_cb = free;
+    stream->cb_opaque = opaque;
 }
 
 int funnel_stream_init_gbm(struct funnel_stream *stream, int gbm_fd) {
@@ -1195,4 +1209,12 @@ void funnel_buffer_get_size(struct funnel_buffer *buf, uint32_t *width,
                             uint32_t *height) {
     *width = gbm_bo_get_width(buf->bo);
     *height = gbm_bo_get_height(buf->bo);
+}
+
+void funnel_buffer_set_user_data(struct funnel_buffer *buf, void *opaque) {
+    buf->opaque = opaque;
+}
+
+void *funnel_buffer_get_user_data(struct funnel_buffer *buf) {
+    return buf->opaque;
 }

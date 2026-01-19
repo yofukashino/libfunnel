@@ -546,6 +546,10 @@ int funnel_buffer_get_vk_semaphores(struct funnel_buffer *buf,
     struct funnel_vk_buffer *vkbuf = buf->api_buf;
     struct funnel_vk_stream *vks = buf->stream->api_ctx;
 
+    // Can only be called once per buffer
+    if (buf->acquire.queried)
+        return -EINVAL;
+
     // Wait for previous use to be complete
     buffer_wait_idle(vkbuf);
 

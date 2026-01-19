@@ -16,7 +16,7 @@ Features:
 - [x] Async and multiple sync modes (with and without buffering)
 - [x] Raw GBM API
 - [x] EGL API integration
-- [ ] Vulkan API integration
+- [x] Vulkan API integration
 - [ ] GLX API integration (if someone really really needs it... ideally apps should switch to X11+EGL)
 - [x] Cross-GPU frame sharing for reasonable drivers (untested but it should work?)
 - [ ] Cross-GPU frame sharing between Nvidia prop driver and other GPUs/drivers

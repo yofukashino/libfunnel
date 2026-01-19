@@ -6,6 +6,40 @@ A library to make creating PipeWire video streams easy, using zero-copy DMA-BUF 
 
 This is still rough around the edges and the API is not considered stable yet.
 
+Features:
+
+- [x] Sending frames
+- [ ] Receiving frames
+- [ ] Multiple synchronized streams
+- [x] Implicit sync
+- [ ] Explicit sync
+- [x] Async and multiple sync modes (with and without buffering)
+- [x] Raw GBM API
+- [x] EGL API integration
+- [ ] Vulkan API integration
+- [ ] GLX API integration (if someone really really needs it... ideally apps should switch to X11+EGL)
+- [x] Cross-GPU frame sharing for reasonable drivers (untested but it should work?)
+- [ ] Cross-GPU frame sharing between Nvidia prop driver and other GPUs/drivers
+- [ ] Automatic optimization for cross-GPU frame sharing (framebuffer optimization/conversion blits)
+
+Note: Due to missing explicit sync support, the Nvidia proprietary driver is not currently well supported (frame sharing will work, but you might experience tearing or frame pacing issues). This is a planned feature, but it will require work by application developers (it cannot be made transparent in the API), so some apps might choose not to support it. In addition, frame sharing between an Nvidia GPU and a non-Nvidia GPU requires special support code and extra blitting, which will probably not be implemented until much later. If you have an Nvidia GPU, please consider using [NVK](https://docs.mesa3d.org/drivers/nvk.html) instead, since it implements all the missing features that Nvidia refuses to implement in their proprietary driver, and therefore doesn't require us application and library developers to add Nvidia-specific workaround code.
+
+### Sending frames
+
+The library initially targets sending frames to other applications (output). This covers the common use case of apps sending video to OBS for streaming.
+
+### Receiving frames
+
+Receiving is not implemented yet, but is in scope. Before jumping into this, I'd like to hear from maintainers of applications that receive video via Spout2/Syphon. If you maintain such an app (with existing or planned Linux support), please file an issue and let me know!
+
+Of course, that doesn't make the sending side useless. To receive video streams in OBS, you can use [obs-pwvideo](https://github.com/hoshinolina/obs-pwvideo), which comes with its own PipeWire code (not using libfunnel itself).
+
+It is also possible to hijack the input of any app using PipeWire screen sharing (such as Firefox, etc.) and redirect a libfunnel input stream into it, though this requires some hacky pw-cli shenanigans. If you have a use case for this, please let me know, as it should be possible to write a tool to do it mostly automatically.
+
+### Multiple streams (multiple senders, multiple receivers, or combinations)
+
+Multiple streams are supported the "obvious" way, but the streams behave completely independently (no synchronization) in the current implementation. For applications that synchronously process video, such as filters (input => output), there are better ways to do it. If you maintain an app that expects to input and/or output multiple video streams with locked frame sync, please file an issue and let me know your needs! The underlying PipeWire API is extremely powerful and complicated, and I need some example use cases to decide what a simplified libfunnel API for this should look like.
+
 ## Usage
 
 TL;DR for EGL

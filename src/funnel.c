@@ -1336,6 +1336,7 @@ static int funnel_stream_enqueue_internal(struct funnel_stream *stream,
 
     if (stream->cur.config.mode == FUNNEL_SYNCHRONOUS &&
         stream->cycle_state != SYNC_CYCLE_ACTIVE) {
+        pw_stream_return_buffer(stream->stream, buf->pw_buffer);
         pw_log_info("enqueue: Aborted sync cycle, dropping buffer");
         UNLOCK_RETURN(0);
     }

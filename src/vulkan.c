@@ -535,7 +535,8 @@ int funnel_stream_init_vulkan(struct funnel_stream *stream, VkInstance instance,
     vks->vkGetSemaphoreFdKHR = vkGetSemaphoreFdKHR;
     vks->vkImportSemaphoreFdKHR = vkImportSemaphoreFdKHR;
 
-    ret = funnel_stream_set_sync(stream, FUNNEL_SYNC_EXPLICIT_HYBRID);
+    ret =
+        funnel_stream_set_sync(stream, FUNNEL_SYNC_EXPLICIT, FUNNEL_SYNC_BOTH);
     if (ret < 0) {
         pw_log_error("Vulkan requires explicit sync, but the driver does not "
                      "support it?");

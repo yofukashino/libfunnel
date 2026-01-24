@@ -132,7 +132,7 @@ static void on_add_buffer(void *data, struct pw_buffer *pwbuffer) {
 
     buffer->frontend_sync = buffer->backend_sync;
     if (!buffer->backend_sync &&
-        stream->cur.config.sync == FUNNEL_SYNC_EXPLICIT_HYBRID) {
+        stream->cur.config.frontend_sync == FUNNEL_SYNC_EXPLICIT) {
         int fd = gbm_device_get_fd(stream->gbm);
 
         int ret = drmSyncobjCreate(fd, 0, &buffer->acquire.handle);
@@ -191,7 +191,7 @@ static void funnel_buffer_free(struct funnel_buffer *buffer) {
     }
 
     if (!buffer->backend_sync &&
-        stream->cur.config.sync == FUNNEL_SYNC_EXPLICIT_HYBRID) {
+        stream->cur.config.frontend_sync == FUNNEL_SYNC_EXPLICIT) {
         int fd = gbm_device_get_fd(stream->gbm);
 
         int ret = drmSyncobjDestroy(fd, buffer->acquire.handle);
@@ -719,7 +719,7 @@ int funnel_stream_create(struct funnel_ctx *ctx, const char *name,
     stream->name = strdup(name);
 
     funnel_stream_set_mode(stream, FUNNEL_ASYNC);
-    funnel_stream_set_sync(stream, FUNNEL_SYNC_IMPLICIT);
+    funnel_stream_set_sync(stream, FUNNEL_SYNC_IMPLICIT, FUNNEL_SYNC_IMPLICIT);
 
     stream->config.rate.def = FUNNEL_RATE_VARIABLE;
     stream->config.rate.min = FUNNEL_RATE_VARIABLE;
@@ -933,30 +933,52 @@ int funnel_stream_set_mode(struct funnel_stream *stream,
 }
 
 int funnel_stream_set_sync(struct funnel_stream *stream,
-                           enum funnel_sync sync) {
-    if (sync == FUNNEL_SYNC_EXPLICIT_ONLY)
+                           enum funnel_sync frontend,
+                           enum funnel_sync backend) {
+    if (backend == FUNNEL_SYNC_EXPLICIT)
         return -EOPNOTSUPP; // TODO
 
-    switch (sync) {
-    case FUNNEL_SYNC_EITHER:
+    switch (frontend) {
+    case FUNNEL_SYNC_BOTH:
         // It is legal to request this if the API does not support
         // explicit sync (EGL without the right extension). In that
         // case, it is converted to IMPLICIT.
         if (!stream->api_supports_explicit_sync)
-            sync = FUNNEL_SYNC_IMPLICIT;
+            frontend = FUNNEL_SYNC_IMPLICIT;
         // Fallthrough
     case FUNNEL_SYNC_IMPLICIT:
         if (stream->api_requires_explicit_sync)
             return -EOPNOTSUPP;
         break;
-    case FUNNEL_SYNC_EXPLICIT_HYBRID:
-    case FUNNEL_SYNC_EXPLICIT_ONLY:
+    case FUNNEL_SYNC_EXPLICIT:
         if (!stream->api_supports_explicit_sync)
             return -EOPNOTSUPP;
         break;
+    default:
+        return -EINVAL;
     }
 
-    stream->config.sync = sync;
+    switch (backend) {
+    case FUNNEL_SYNC_EXPLICIT:
+        if (frontend == FUNNEL_SYNC_BOTH)
+            frontend = FUNNEL_SYNC_EXPLICIT;
+        // Fallthrough
+    case FUNNEL_SYNC_BOTH:
+        if (frontend == FUNNEL_SYNC_IMPLICIT) {
+            pw_log_error(
+                "Converting explicit sync to implicit is not supported");
+            return -EINVAL;
+        }
+        break;
+    case FUNNEL_SYNC_IMPLICIT:
+        if (frontend == FUNNEL_SYNC_BOTH)
+            frontend = FUNNEL_SYNC_IMPLICIT;
+    default:
+        return -EINVAL;
+    }
+
+    stream->config.frontend_sync = frontend;
+    stream->config.backend_sync = backend;
     stream->config_pending = true;
     return 0;
 }

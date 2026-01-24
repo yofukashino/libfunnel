@@ -123,68 +123,31 @@ enum funnel_mode {
 
 /**
  * Buffer synchronization modes for frames
+ *
+ * See \ref buffersync for more information on sync modes.
  */
 enum funnel_sync {
     /**
-     * Use implicit buffer sync only.
-     *
-     * This will only advertise implicit sync on
-     * the PipeWire stream. The other end must
-     * support implicit sync.
-     *
-     * Explicit sync APIs are not available on
-     * buffers.
-     *
-     * Not available for Vulkan. Does not work on
-     * the NVidia proprietary driver.
+     * Use implicit sync only.
      */
     FUNNEL_SYNC_IMPLICIT,
 
     /**
-     * Use explicit buffer sync, with automatic
-     * conversion to implicit sync.
-     *
-     * Advertise both implicit and explicit
-     * sync, and negotiate automatically depending
-     * on the capabilities of the other end.
-     *
-     * You must use explicit sync APIs to
-     * synchronize buffer access.
+     * Use explicit sync only.
      */
-    FUNNEL_SYNC_EXPLICIT_HYBRID,
+    FUNNEL_SYNC_EXPLICIT,
+
     /**
-     * Use explicit buffer sync only.
-     *
-     * This will only advertise explicit sync on
-     * the PipeWire stream. The other end must
-     * support explicit sync, or else stream
-     * negotiation will fail.
-     *
-     * You must use explicit sync APIs to
-     * synchronize buffer access.
+     * Support both implicit and explicit sync.
      */
-    FUNNEL_SYNC_EXPLICIT_ONLY,
-    /**
-     * Support both explicit and implicit sync.
-     *
-     * Advertise both implicit and explicit
-     * sync, and negotiate automatically depending
-     * on the capabilities of the other end.
-     *
-     * You must query the sync type for each
-     * dequeued funnel_buffer, and use explicit
-     * sync APIs if the buffer has explicit sync
-     * enabled.
-     *
-     * Not available for Vulkan.
-     */
-    FUNNEL_SYNC_EITHER,
+    FUNNEL_SYNC_BOTH,
 };
 
 /**
  * Create a Funnel context.
  *
- * As multiple Funnel contexts are completely independent, this function has no synchronization requirements.
+ * As multiple Funnel contexts are completely independent, this function has no
+ * synchronization requirements.
  *
  * @param[out] pctx New context @owned
  * @return_err
@@ -257,16 +220,20 @@ int funnel_stream_set_size(struct funnel_stream *stream, uint32_t width,
 int funnel_stream_set_mode(struct funnel_stream *stream, enum funnel_mode mode);
 
 /**
- * Configure the synchronization mode for the stream.
+ * Configure the synchronization modes for the stream.
+ *
+ * See \ref buffersync for more information on sync modes.
  *
  * @sync-ext
  *
  * @param stream Stream @borrowed
- * @param sync Synchronization mode for the stream
+ * @param frontend Synchronization mode for the libfunnel API
+ * @param backend Synchronization mode for the PipeWire stream
  * @return_err
  * @retval -EOPNOTSUPP The selected API does not support this sync mode
  */
-int funnel_stream_set_sync(struct funnel_stream *stream, enum funnel_sync sync);
+int funnel_stream_set_sync(struct funnel_stream *stream,
+                           enum funnel_sync frontend, enum funnel_sync backend);
 
 /**
  * Set the frame rate of a stream.

@@ -241,7 +241,8 @@ int main(int argc, char **argv) {
     uint32_t height = 512;
 
     enum funnel_mode mode = FUNNEL_ASYNC;
-    enum funnel_sync sync = FUNNEL_SYNC_EITHER;
+    enum funnel_sync frontend_sync = FUNNEL_SYNC_BOTH;
+    enum funnel_sync backend_sync = FUNNEL_SYNC_BOTH;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-async"))
@@ -254,13 +255,13 @@ int main(int argc, char **argv) {
             mode = FUNNEL_SYNCHRONOUS;
 
         else if (!strcmp(argv[i], "-implicit_sync"))
-            sync = FUNNEL_SYNC_IMPLICIT;
+            frontend_sync = backend_sync = FUNNEL_SYNC_IMPLICIT;
         else if (!strcmp(argv[i], "-explicit_sync_only"))
-            sync = FUNNEL_SYNC_EXPLICIT_ONLY;
+            frontend_sync = backend_sync = FUNNEL_SYNC_EXPLICIT;
         else if (!strcmp(argv[i], "-explicit_sync_hybrid"))
-            sync = FUNNEL_SYNC_EXPLICIT_HYBRID;
+            frontend_sync = FUNNEL_SYNC_EXPLICIT;
         else if (!strcmp(argv[i], "-either_sync"))
-            sync = FUNNEL_SYNC_EITHER;
+            frontend_sync = backend_sync = FUNNEL_SYNC_BOTH;
     }
 
     do_init(width, height);
@@ -282,7 +283,7 @@ int main(int argc, char **argv) {
     ret = funnel_stream_set_mode(stream, mode);
     assert(ret == 0);
 
-    ret = funnel_stream_set_sync(stream, sync);
+    ret = funnel_stream_set_sync(stream, frontend_sync, backend_sync);
     assert(ret == 0);
 
     ret =

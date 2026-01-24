@@ -4,6 +4,10 @@
 
 A library to make creating PipeWire video streams easy, using zero-copy DMA-BUF frame sharing. "Spout2 / Syphon, but for Linux".
 
+## Documentation
+
+See [libfunnel Documentation](https://libfunnel.readthedocs.io/)
+
 ## Status
 
 This is still rough around the edges and the API is not considered stable yet.

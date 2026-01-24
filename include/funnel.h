@@ -184,6 +184,8 @@ enum funnel_sync {
 /**
  * Create a Funnel context.
  *
+ * As multiple Funnel contexts are completely independent, this function has no synchronization requirements.
+ *
  * @param[out] pctx New context @owned
  * @return_err
  * @retval -ECONNREFUSED Failed to connect to PipeWire daemon
@@ -193,12 +195,16 @@ int funnel_init(struct funnel_ctx **pctx);
 /**
  * Shut down a Funnel context.
  *
+ * @sync-ext
+ *
  * @param ctx Context @owned
  */
 void funnel_shutdown(struct funnel_ctx *ctx);
 
 /**
  * Create a new stream.
+ *
+ * @sync-int
  *
  * @param ctx Context @borrowed
  * @param name Name of the new stream @borrowed
@@ -211,6 +217,8 @@ int funnel_stream_create(struct funnel_ctx *ctx, const char *name,
 
 /**
  * Specify callbacks for buffer creation/destruction.
+ *
+ * @sync-ext
  *
  * @param stream Stream @borrowed
  * @param alloc Callback when a buffer is allocated @borrowed-by{stream}
@@ -225,6 +233,8 @@ void funnel_stream_set_buffer_callbacks(struct funnel_stream *stream,
 /**
  * Set the frame dimensions for a stream.
  *
+ * @sync-ext
+ *
  * @param stream Stream @borrowed
  * @param width Width in pixels
  * @param height Height in pixels
@@ -237,6 +247,8 @@ int funnel_stream_set_size(struct funnel_stream *stream, uint32_t width,
 /**
  * Configure the queueing mode for the stream.
  *
+ * @sync-ext
+ *
  * @param stream Stream @borrowed
  * @param mode Queueing mode for the stream
  * @return_err
@@ -247,6 +259,8 @@ int funnel_stream_set_mode(struct funnel_stream *stream, enum funnel_mode mode);
 /**
  * Configure the synchronization mode for the stream.
  *
+ * @sync-ext
+ *
  * @param stream Stream @borrowed
  * @param sync Synchronization mode for the stream
  * @return_err
@@ -256,6 +270,8 @@ int funnel_stream_set_sync(struct funnel_stream *stream, enum funnel_sync sync);
 
 /**
  * Set the frame rate of a stream.
+ *
+ * @sync-ext
  *
  * @param stream Stream @borrowed
  * @param def Default frame rate (FUNNEL_RATE_VARIABLE for no default or
@@ -273,6 +289,8 @@ int funnel_stream_set_rate(struct funnel_stream *stream,
 /**
  * Get the currently negotiated frame rate of a stream.
  *
+ * @sync-int
+ *
  * @param stream Stream @borrowed
  * @param[out] prate Output frame rate
  * @return_err
@@ -284,6 +302,8 @@ int funnel_stream_get_rate(struct funnel_stream *stream,
 /**
  * Clear the supported format list. Used for reconfiguration.
  *
+ * @sync-ext
+ *
  * @param stream Stream @borrowed
  */
 void funnel_stream_clear_formats(struct funnel_stream *stream);
@@ -293,6 +313,8 @@ void funnel_stream_clear_formats(struct funnel_stream *stream);
  *
  * If called on an already configured stream, this will update the
  * configuration.
+ *
+ * @sync-ext
  *
  * @param stream Stream @borrowed
  * @return_err
@@ -304,6 +326,8 @@ int funnel_stream_configure(struct funnel_stream *stream);
 /**
  * Start running a stream.
  *
+ * @sync-int
+ *
  * @param stream Stream @borrowed
  * @return_err
  * @retval -EINVAL The stream is in an invalid state (not configured)
@@ -313,10 +337,11 @@ int funnel_stream_start(struct funnel_stream *stream);
 
 /**
  * Stop running a stream.
-
- * This function may be called from any thread, which is
- * useful to abort a call to `funnel_stream_dequeue()`
- * in one of the synchronous modes.
+ *
+ * If another thread is blocked on funnel_stream_dequeue(), this will
+ * unblock it.
+ *
+ * @sync-int
  *
  * @param stream Stream @borrowed
  * @return_err
@@ -330,6 +355,8 @@ int funnel_stream_stop(struct funnel_stream *stream);
  *
  * The stream will be stopped if it is running.
  *
+ * @sync-ext
+ *
  * @param stream Stream @owned
  */
 void funnel_stream_destroy(struct funnel_stream *stream);
@@ -339,6 +366,8 @@ void funnel_stream_destroy(struct funnel_stream *stream);
  *
  * Note that, currently, you may only have one buffer
  * dequeued at a time.
+ *
+ * @sync-int
  *
  * @param stream Stream @borrowed
  * @param[out] pbuf Buffer that was dequeued @owned-from{stream}
@@ -359,6 +388,8 @@ int funnel_stream_dequeue(struct funnel_stream *stream,
  *
  * After this call, the buffer is no longer owned by the user and may not be
  * queued again until it is dequeued.
+ *
+ * @sync-int
  *
  * @param stream Stream @borrowed
  * @param buf Buffer to enqueue @owned
@@ -383,6 +414,8 @@ int funnel_stream_enqueue(struct funnel_stream *stream,
  * After this call, the buffer is no longer owned by the user and may not be
  * queued again until it is dequeued. This will effectively drop one frame.
  *
+ * @sync-int
+ *
  * @param stream Stream @borrowed
  * @param buf Buffer to return @owned
  * @return_err
@@ -402,6 +435,8 @@ int funnel_stream_return(struct funnel_stream *stream,
  * to return without a buffer. This is useful to break a thread out of
  * that function.
  *
+ * @sync-int
+ *
  * @param stream Stream @borrowed
  * @return_err
  * @retval -EINVAL Stream is in an invalid state (not yet configured)
@@ -410,6 +445,8 @@ int funnel_stream_skip_frame(struct funnel_stream *stream);
 
 /**
  * Get the dimensions of a Funnel buffer.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @param[out] pwidth Output width
@@ -427,6 +464,8 @@ void funnel_buffer_get_size(struct funnel_buffer *buf, uint32_t *pwidth,
  * release the user data pointer in the alloc and free callback
  * respectively.
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @param opaque Opaque user data pointer
  */
@@ -435,6 +474,8 @@ void funnel_buffer_set_user_data(struct funnel_buffer *buf, void *opaque);
 /**
  * Get an arbitrary user data pointer for a buffer.
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @return The user data pointer
  */
@@ -442,6 +483,8 @@ void *funnel_buffer_get_user_data(struct funnel_buffer *buf);
 
 /**
  * Check whether a buffer requires explicit synchronization.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @retval true if the buffer requires explicit synchronization
@@ -453,6 +496,8 @@ bool funnel_buffer_has_sync(struct funnel_buffer *buf);
  *
  * Buffers are considered efficient when they are not using linear tiling
  * and non-linear tiling is supported by the GPU driver.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @retval true if the buffer is likely to be efficient to render into

@@ -16,6 +16,8 @@ enum funnel_egl_format {
 /**
  * Set up a stream for EGL integration.
  *
+ * @sync-ext
+ *
  * @param stream Stream @borrowed
  * @param display EGLDisplay to attach to the stream @borrowed-by{stream}
  * @return_err
@@ -30,6 +32,8 @@ int funnel_stream_init_egl(struct funnel_stream *stream, EGLDisplay display);
 /**
  * Add a supported EGL format. Must be called in preference order (highest to
  * lowest).
+ *
+ * @sync-ext
  *
  * @param stream Stream @borrowed
  * @param format `enum funnel_egl_format` format
@@ -48,6 +52,8 @@ int funnel_stream_egl_add_format(struct funnel_stream *stream,
  * The EGLImage will only be valid until `buf` is returned or enqueued, or the
  * stream is destroyed.
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @param[out] pimage EGLImage for the buffer @borrowed-from{buf}
  * @return_err
@@ -59,6 +65,8 @@ int funnel_buffer_get_egl_image(struct funnel_buffer *buf, EGLImage *pimage);
 
 /**
  * Get the EGL format for a Funnel buffer.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @param[out] pformat EGL format
@@ -76,6 +84,8 @@ int funnel_buffer_get_egl_format(struct funnel_buffer *buf,
  * The user must wait on this sync object before accessing
  * the buffer.
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @param[out] psync EGLSync @owned
  * @return_err
@@ -92,6 +102,8 @@ int funnel_buffer_get_acquire_egl_sync(struct funnel_buffer *buf,
  *
  * This sync object must be signaled when access to the buffer is complete.
  * The sync type must be EGL_SYNC_NATIVE_FENCE_ANDROID.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @param sync EGLSync @borrowed

@@ -39,6 +39,7 @@
 /**
  * Set up a stream for Vulkan integration.
  *
+ * @sync-ext
  *
  * @param stream Stream @borrowed
  * @param instance VkInstance to use for the stream @borrowed-by{stream}
@@ -62,6 +63,8 @@ int funnel_stream_init_vulkan(struct funnel_stream *stream, VkInstance instance,
  * funnel_stream_vk_add_format() will fail if the requested usages
  * are not available. In this case, you may reconfigure the usage
  * and try again.
+ *
+ * @sync-ext
  *
  * @param stream Stream @borrowed
  * @param usage Required VkImageUsageFlagBits.
@@ -87,6 +90,8 @@ int funnel_stream_vk_set_usage(struct funnel_stream *stream,
  * you need UNORM (because you are doing sRGB/gamma conversion in your shader),
  * you can use UNORM constants when you create a VkImageView.
  *
+ * @sync-ext
+ *
  * @param stream Stream @borrowed
  * @param format VkFormat
  * @param alpha Whether alpha is meaningful or ignored
@@ -108,6 +113,8 @@ int funnel_stream_vk_add_format(struct funnel_stream *stream, VkFormat format,
  * The VkImage is only valid while `buf` is dequeued, or before the destroy
  * callback is used (if you use buffer callbacks).
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @param[out] pimage VkImage for the buffer @borrowed-from{buf}
  * @return_err
@@ -119,6 +126,8 @@ int funnel_buffer_get_vk_image(struct funnel_buffer *buf, VkImage *pimage);
 
 /**
  * Get the VkFormat for a Funnel buffer.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @param[out] pformat VkFormat for the buffer
@@ -138,6 +147,8 @@ int funnel_buffer_get_vk_format(struct funnel_buffer *buf, VkFormat *pformat,
  * The user must wait on the acquier VkSemaphore object before accessing
  * the buffer, and signal the release VkSemaphore after accessing the buffer.
  * These semaphores are valid while the buffer is dequeued.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @param[out] pacquire Acquire VkSemaphore @borrowed-from{buf}

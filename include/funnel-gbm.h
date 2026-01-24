@@ -7,6 +7,8 @@
 /**
  * Set up a stream for GBM integration.
  *
+ * @sync-ext
+ *
  * @param stream Stream @borrowed
  * @param gbm_fd File descriptor of the GBM device @borrowed
  * @return_err
@@ -18,6 +20,8 @@ int funnel_stream_init_gbm(struct funnel_stream *stream, int gbm_fd);
 /**
  * Add a supported GBM format. Must be called in preference order (highest to
  * lowest).
+ *
+ * @sync-ext
  *
  * @param stream Stream @borrowed
  * @param format DRM format (FOURCC)
@@ -40,6 +44,8 @@ int funnel_stream_gbm_add_format(struct funnel_stream *stream, uint32_t format,
  * funnel_buffer_get_size() to retrieve the intended texture dimensions,
  * instead of gbm_bo_get_width() and gbm_bo_get_height().
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @param[out] pbo GBM BO for the buffer @borrowed-from{buf}
  * @return_err
@@ -51,6 +57,8 @@ int funnel_buffer_get_gbm_bo(struct funnel_buffer *buf, struct gbm_bo **pbo);
  *
  * The user must wait on this timeline sync object point before accessing
  * the buffer.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @param[out] phandle Acquire DRM sync object handle @borrowed-from{buf}
@@ -69,6 +77,8 @@ int funnel_buffer_get_acquire_sync_object(struct funnel_buffer *buf,
  * The user must signal this timeline sync object after
  * access to the buffer is complete.
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @param[out] phandle Release DRM sync object handle @borrowed-from{buf}
  * @param[out] ppoint Release DRM sync object point
@@ -86,6 +96,8 @@ int funnel_buffer_get_release_sync_object(struct funnel_buffer *buf,
  * The user must wait on this sync file before accessing
  * the buffer.
  *
+ * @sync-ext
+ *
  * @param buf Buffer @borrowed
  * @param[out] pfd Sync file fd for buffer acquisition @owned
  * @return_err
@@ -100,6 +112,8 @@ int funnel_buffer_get_acquire_sync_file(struct funnel_buffer *buf, int *pfd);
  * Set the sync file for releasing the buffer.
  *
  * This sync file must be signaled when access to the buffer is complete.
+ *
+ * @sync-ext
  *
  * @param buf Buffer @borrowed
  * @param fd DRM sync file signaled on release @borrowed

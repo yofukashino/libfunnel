@@ -28,6 +28,8 @@ ALIASES               += "borrowed=[\ref Lifetimes \"@e Lifetime: <b>borrowed</b
 ALIASES               += "borrowed-from{1}=[\ref Lifetimes \"@e Lifetime: @b borrowed-from <tt>\1</tt>\"]"
 ALIASES               += "borrowed-by{1}=[\ref Lifetimes \"@e Lifetime: @b borrowed-by <tt>\1</tt>\"]"
 ALIASES               += "owned=[\ref Lifetimes \"@e Lifetime: <b>owned</b>\"]"
+ALIASES               += "sync-int=[\ref Synchronization \"@e Synchronization: <b>internal</b>\"]"
+ALIASES               += "sync-ext=[\ref Synchronization \"@e Synchronization: <b>external</b>\"]"
 INLINE_SIMPLE_STRUCTS  = YES
 
 REFERENCED_BY_RELATION = NO

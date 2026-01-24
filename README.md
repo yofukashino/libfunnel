@@ -1,5 +1,7 @@
 # libfunnel
 
+[![documentation status](https://app.readthedocs.org/projects/libfunnel/badge/?version=latest)](https://libfunnel.readthedocs.io/en/latest/?badge=latest)
+
 A library to make creating PipeWire video streams easy, using zero-copy DMA-BUF frame sharing. "Spout2 / Syphon, but for Linux".
 
 ## Status
@@ -149,3 +151,8 @@ funnel_stream_stop(stream);
 funnel_stream_destroy(stream);
 funnel_shutdown(ctx);
 ```
+
+.. |docs| image:: https://app.readthedocs.org/projects/libfunnel/badge/?version=latest
+    :alt: Documentation Status
+    :scale: 100%
+    :target: https://libfunnel.readthedocs.io/en/latest/?badge=latest

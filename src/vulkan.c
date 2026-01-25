@@ -261,6 +261,9 @@ void funnel_vk_alloc_buffer(struct funnel_buffer *buffer) {
     const uint32_t memory_type_bits =
         fd_props.memoryTypeBits & mem_reqs.memoryRequirements.memoryTypeBits;
 
+    pw_log_info("Memory type bits: 0x%x 0x%x -> 0x%x", fd_props.memoryTypeBits,
+                mem_reqs.memoryRequirements.memoryTypeBits, memory_type_bits);
+
     if (!memory_type_bits) {
         pw_log_error("No valid memory type");
         assert(0);

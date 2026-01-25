@@ -1237,11 +1237,15 @@ int funnel_stream_dequeue(struct funnel_stream *stream,
     struct pw_buffer *pwbuffer;
 
     for (pwbuffer = NULL;; pw_thread_loop_wait(ctx->loop)) {
-        if (ctx->dead)
+        if (ctx->dead) {
+            pw_log_error("libfunnel: Context is dead");
             UNLOCK_RETURN(-EIO);
+        }
 
-        if (!stream->active)
+        if (!stream->active) {
+            pw_log_error("libfunnel: Stream is not running");
             UNLOCK_RETURN(-ESHUTDOWN);
+        }
 
         if (stream->skip_frames) {
             stream->skip_frames--;

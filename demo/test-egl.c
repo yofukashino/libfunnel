@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
@@ -23,9 +24,53 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
 
+void check_egl_error(void) {
+    GLint eglerror = eglGetError();
+    if (eglerror != EGL_SUCCESS) {
+        fprintf(stderr, "EGL error: %d\n", eglerror);
+    }
+    assert(eglerror == EGL_SUCCESS);
+}
+
+void check_error(void) {
+
+    check_egl_error();
+    GLenum error = glGetError();
+
+    switch (error) {
+    case GL_NO_ERROR:
+        return;
+    case GL_INVALID_ENUM:
+        fprintf(stderr, "GL error: GL_INVALID_ENUM\n");
+        break;
+    case GL_INVALID_VALUE:
+        fprintf(stderr, "GL error: GL_INVALID_VALUE\n");
+        break;
+    case GL_INVALID_OPERATION:
+        fprintf(stderr, "GL error: GL_INVALID_OPERATION\n");
+        break;
+    case GL_INVALID_FRAMEBUFFER_OPERATION:
+        fprintf(stderr, "GL error: GL_INVALID_FRAMEBUFFER_OPERATION\n");
+        break;
+    case GL_OUT_OF_MEMORY:
+        fprintf(stderr, "GL error: GL_OUT_OF_MEMORY\n");
+        break;
+    case GL_STACK_UNDERFLOW:
+        fprintf(stderr, "GL error: GL_STACK_UNDERFLOW\n");
+        break;
+    case GL_STACK_OVERFLOW:
+        fprintf(stderr, "GL error: GL_STACK_OVERFLOW\n");
+        break;
+    default:
+        fprintf(stderr, "GL error: %d\n", error);
+        break;
+    }
+    assert(error == GL_NO_ERROR);
+}
+
 static void initialize_egl(Display *x11_display, Window x11_window,
                            EGLDisplay *egl_display, EGLContext *egl_context,
-                           EGLSurface *egl_surface) {
+                           EGLSurface *egl_surface, int depth) {
 
     PFNEGLQUERYDEVICESTRINGEXTPROC eglQueryDeviceStringEXT =
         (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress(
@@ -47,28 +92,50 @@ static void initialize_egl(Display *x11_display, Window x11_window,
     EGLDisplay display = eglGetDisplay(x11_display);
 
     // initialize the EGL display connection
-    eglInitialize(display, NULL, NULL);
+    if (!eglInitialize(display, NULL, NULL)) {
+        fprintf(stderr, "eglInitialize failed\n");
+        check_egl_error();
+    }
 
     // get an appropriate EGL frame buffer configuration
     EGLConfig config;
     EGLint num_config;
-    EGLint const attribute_list_config[] = {EGL_RED_SIZE,  8, EGL_GREEN_SIZE, 8,
-                                            EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
-                                            EGL_NONE};
-    eglChooseConfig(display, attribute_list_config, &config, 1, &num_config);
+    EGLint const attribute_list_config[] = {
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_RED_SIZE,     8,
+        EGL_GREEN_SIZE,   8,
+        EGL_BLUE_SIZE,    8,
+        EGL_ALPHA_SIZE,   depth == 32 ? 8 : 0,
+        EGL_NONE};
+    if (!eglChooseConfig(display, attribute_list_config, &config, 1,
+                         &num_config)) {
+        fprintf(stderr, "eglChooseConfig failed\n");
+        check_egl_error();
+    }
 
     // create an EGL rendering context
     EGLint const attrib_list[] = {EGL_CONTEXT_MAJOR_VERSION, 3,
                                   EGL_CONTEXT_MINOR_VERSION, 3, EGL_NONE};
     EGLContext context =
         eglCreateContext(display, config, EGL_NO_CONTEXT, attrib_list);
+    if (!context) {
+        fprintf(stderr, "eglCreateContext failed\n");
+        check_egl_error();
+    }
 
     // create an EGL window surface
     EGLSurface surface =
         eglCreateWindowSurface(display, config, x11_window, NULL);
+    if (!surface) {
+        fprintf(stderr, "eglCreateWindowSurface failed\n");
+        check_egl_error();
+    }
 
     // connect the context to the surface
-    eglMakeCurrent(display, surface, surface, context);
+    if (!eglMakeCurrent(display, surface, surface, context)) {
+        fprintf(stderr, "eglMakeCurrent failed\n");
+        check_egl_error();
+    }
 
     // Return
     *egl_display = display;
@@ -184,14 +251,49 @@ void gl_draw_triangle(void) {
     glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, 0);
 }
 
-void create_x11_window(Display **x11_display, Window *x11_window, int w,
-                       int h) {
+bool is_argb_visual(const XVisualInfo *visual) {
+    return visual->depth == 32 && visual->red_mask == 0xff0000 &&
+           visual->green_mask == 0x00ff00 && visual->blue_mask == 0x0000ff;
+}
+
+void create_x11_window(Display **x11_display, Window *x11_window, int w, int h,
+                       int *depth) {
     // Open X11 display and create window
     Display *display = XOpenDisplay(NULL);
     int screen = DefaultScreen(display);
-    Window window = XCreateSimpleWindow(
-        display, RootWindow(display, screen), 10, 10, w, h, 1,
-        BlackPixel(display, screen), WhitePixel(display, screen));
+
+    XVisualInfo vinfo;
+    int visual_depth = 32;
+    bool matched = !!XMatchVisualInfo(display, XDefaultScreen(display),
+                                      visual_depth, TrueColor, &vinfo);
+    if (!matched) {
+        visual_depth = 24;
+        matched = !!XMatchVisualInfo(display, XDefaultScreen(display),
+                                     visual_depth, TrueColor, &vinfo);
+    }
+    if (!matched) {
+        fprintf(stderr, "Failed to find window visual\n");
+        assert(0);
+    }
+
+    if (is_argb_visual(&vinfo))
+        *depth = 32;
+    else
+        *depth = 24;
+
+    fprintf(stderr, "Depth: %d\n", *depth);
+
+    XSetWindowAttributes attrs;
+
+    attrs.colormap = XCreateColormap(display, XDefaultRootWindow(display),
+                                     vinfo.visual, AllocNone);
+    attrs.background_pixel = BlackPixel(display, screen);
+    attrs.border_pixel = BlackPixel(display, screen);
+    Window window =
+        XCreateWindow(display, RootWindow(display, screen), 10, 10, w, h, 1,
+                      visual_depth, InputOutput, vinfo.visual,
+                      CWBackPixel | CWColormap | CWBorderPixel, &attrs);
+
     XStoreName(display, window, "Client");
     XMapWindow(display, window);
 
@@ -208,11 +310,13 @@ int do_init(uint32_t width, uint32_t height) {
     // Create X11 window
     Display *x11_display;
     Window x11_window;
-    create_x11_window(&x11_display, &x11_window, width, height);
+    int depth;
+
+    create_x11_window(&x11_display, &x11_window, width, height, &depth);
 
     // Initialize EGL
     initialize_egl(x11_display, x11_window, &egl_display, &egl_context,
-                   &egl_surface);
+                   &egl_surface, depth);
 
     // Setup GL scene
     gl_setup_scene();
@@ -302,12 +406,13 @@ int main(int argc, char **argv) {
     ret = funnel_stream_start(stream);
     assert(ret == 0);
 
+    check_error();
+
     GLuint fb;
     glGenFramebuffers(1, &fb);
 
     while (1) {
-
-        assert(glGetError() == GL_NO_ERROR);
+        check_error();
 
         struct funnel_buffer *buf;
 
@@ -320,7 +425,9 @@ int main(int argc, char **argv) {
             fprintf(stderr, "[%f] Got buffer\n", t);
         }
 
+        check_error();
         gl_draw_triangle();
+        check_error();
 
         if (buf) {
             EGLImage image;
@@ -335,6 +442,7 @@ int main(int argc, char **argv) {
                 assert(ret == 0);
                 eglWaitSync(egl_display, acquire, 0);
                 eglDestroySync(egl_display, acquire);
+                check_error();
             }
 
             GLuint color_tex;
@@ -365,6 +473,7 @@ int main(int argc, char **argv) {
             } else {
                 glFlush();
             }
+            check_error();
         }
 
         eglSwapBuffers(egl_display, egl_surface);

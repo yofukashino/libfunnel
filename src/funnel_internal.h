@@ -52,6 +52,9 @@ struct funnel_stream_config {
 
     struct pw_array formats;
     bool has_nonlinear_tiling;
+
+    // API-specific fields
+    uint32_t vk_usage;
 };
 
 enum funnel_api {

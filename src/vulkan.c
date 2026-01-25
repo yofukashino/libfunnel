@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <gbm.h>
 #include <poll.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
@@ -17,7 +18,6 @@ struct funnel_vk_stream {
     VkInstance instance;
     VkDevice device;
     VkPhysicalDevice physical_device;
-    VkImageUsageFlagBits usage;
 
     PFN_vkGetMemoryFdPropertiesKHR vkGetMemoryFdPropertiesKHR;
     PFN_vkGetImageMemoryRequirements2KHR vkGetImageMemoryRequirements2KHR;
@@ -145,7 +145,7 @@ int funnel_stream_vk_add_format(struct funnel_stream *stream, VkFormat format,
             .format = format,
             .type = VK_IMAGE_TYPE_2D,
             .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
-            .usage = vks->usage,
+            .usage = stream->config.vk_usage,
         };
 
         VkResult res = vkGetPhysicalDeviceImageFormatProperties2(
@@ -234,7 +234,7 @@ void funnel_vk_alloc_buffer(struct funnel_buffer *buffer) {
         .arrayLayers = 1,
         .samples = 1,
         .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
-        .usage = vks->usage,
+        .usage = stream->cur.config.vk_usage,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
@@ -421,9 +421,12 @@ int funnel_stream_vk_set_usage(struct funnel_stream *stream,
     if (!stream || stream->api != API_VULKAN)
         return -EINVAL;
 
-    struct funnel_vk_stream *vks = stream->api_ctx;
+    stream->config.vk_usage = usage;
 
-    vks->usage = usage;
+    if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+        funnel_stream_gbm_set_flags(stream, GBM_BO_USE_RENDERING);
+    else
+        funnel_stream_gbm_set_flags(stream, 0);
 
     return 0;
 }
@@ -568,13 +571,14 @@ int funnel_stream_init_vulkan(struct funnel_stream *stream, VkInstance instance,
     vks->instance = instance;
     vks->device = device;
     vks->physical_device = physical_device;
-    vks->usage =
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
     vks->vkGetMemoryFdPropertiesKHR = vkGetMemoryFdPropertiesKHR;
     vks->vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2KHR;
     vks->vkGetSemaphoreFdKHR = vkGetSemaphoreFdKHR;
     vks->vkImportSemaphoreFdKHR = vkImportSemaphoreFdKHR;
+
+    stream->config.vk_usage =
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
     ret =
         funnel_stream_set_sync(stream, FUNNEL_SYNC_EXPLICIT, FUNNEL_SYNC_BOTH);

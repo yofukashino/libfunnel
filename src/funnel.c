@@ -804,15 +804,6 @@ int funnel_stream_init_gbm(struct funnel_stream *stream, int gbm_fd) {
     return 0;
 }
 
-/**
- * Add a supported GBM format. Must be called in preference order (highest to
- * lowest).
- *
- * @param stream Stream
- * @param format DRM format (FOURCC)
- * @param modifiers Pointer to a list of modifiers (borrow)
- * @param num_modifiers Number of modifiers passed
- */
 int funnel_stream_gbm_add_format(struct funnel_stream *stream, uint32_t format,
                                  uint64_t *modifiers, size_t num_modifiers) {
     int i;

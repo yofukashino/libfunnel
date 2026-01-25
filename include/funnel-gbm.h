@@ -27,6 +27,7 @@ int funnel_stream_init_gbm(struct funnel_stream *stream, int gbm_fd);
  * @param format DRM format (FOURCC)
  * @param modifiers Pointer to a list of modifiers @borrowed
  * @param num_modifiers Number of modifiers passed
+ * @return_err
  * @retval -EINVAL Invalid argument
  * @retval -ENOTSUP Format is not supported by libfunnel
  */

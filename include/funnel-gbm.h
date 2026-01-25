@@ -35,6 +35,16 @@ int funnel_stream_gbm_add_format(struct funnel_stream *stream, uint32_t format,
                                  uint64_t *modifiers, size_t num_modifiers);
 
 /**
+ * Set the GBM BO allocation flags.
+ *
+ * @param stream Stream @borrowed
+ * @param flags BO flags
+ * @return_err
+ * @retval -EINVAL Invalid argument
+ */
+int funnel_stream_gbm_set_flags(struct funnel_stream *stream, uint32_t flags);
+
+/**
  * Get the GBM buffer object for a Funnel buffer.
  *
  * The BO will only be valid until `buf` is returned or enqueued, or the

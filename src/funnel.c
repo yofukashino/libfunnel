@@ -108,8 +108,6 @@ static const struct pw_core_events core_events = {
 static void on_add_buffer(void *data, struct pw_buffer *pwbuffer) {
     struct funnel_stream *stream = data;
 
-    int flags = GBM_BO_USE_RENDERING;
-
     struct spa_data *spa_data = pwbuffer->buffer->datas;
     assert(spa_data[0].type & (1 << SPA_DATA_DmaBuf));
 
@@ -117,7 +115,8 @@ static void on_add_buffer(void *data, struct pw_buffer *pwbuffer) {
 
     bo = gbm_bo_create_with_modifiers2(stream->gbm, stream->cur.aligned_width,
                                        stream->cur.height, stream->cur.format,
-                                       &stream->cur.modifier, 1, flags);
+                                       &stream->cur.modifier, 1,
+                                       stream->cur.config.bo_flags);
 
     assert(bo);
 
@@ -318,14 +317,12 @@ static void on_state_changed(void *data, enum pw_stream_state old,
 
 static bool test_create_dmabuf(struct funnel_stream *stream, uint32_t format,
                                uint64_t *modifiers, size_t num_modifiers) {
-    int flags = GBM_BO_USE_RENDERING;
-
     struct gbm_bo *bo;
 
-    bo = gbm_bo_create_with_modifiers2(stream->gbm,
-                                       stream->cur.video_format.size.width,
-                                       stream->cur.video_format.size.height,
-                                       format, modifiers, num_modifiers, flags);
+    bo = gbm_bo_create_with_modifiers2(
+        stream->gbm, stream->cur.video_format.size.width,
+        stream->cur.video_format.size.height, format, modifiers, num_modifiers,
+        stream->cur.config.bo_flags);
     if (!bo)
         return false;
 
@@ -345,10 +342,12 @@ static bool test_create_dmabuf(struct funnel_stream *stream, uint32_t format,
 
         bo = gbm_bo_create_with_modifiers2(
             stream->gbm, stream->cur.aligned_width, stream->cur.height, format,
-            &mod, 1, flags);
+            &mod, 1, stream->cur.config.bo_flags);
 
-        if (!bo)
+        if (!bo) {
+            pw_log_error("Failed to re-create LINEAR buffer");
             return false;
+        }
 
         assert(gbm_bo_get_width(bo) == stream->cur.aligned_width);
         assert(gbm_bo_get_height(bo) == stream->cur.height);
@@ -798,6 +797,7 @@ int funnel_stream_init_gbm(struct funnel_stream *stream, int gbm_fd) {
                 stream->gbm_timeline_sync_import_export);
 #endif
 
+    stream->config.bo_flags = GBM_BO_USE_RENDERING;
     stream->api = API_GBM;
     stream->api_supports_explicit_sync = stream->gbm_timeline_sync;
     stream->api_requires_explicit_sync = false;
@@ -884,6 +884,15 @@ static void funnel_copy_formats(struct pw_array *dst, struct pw_array *src) {
     }
 }
 
+int funnel_stream_gbm_set_flags(struct funnel_stream *stream, uint32_t flags) {
+    assert(stream);
+
+    stream->config.bo_flags = flags;
+    stream->config_pending = true;
+
+    return 0;
+}
+
 int funnel_stream_set_size(struct funnel_stream *stream, uint32_t width,
                            uint32_t height) {
     assert(stream);
@@ -900,6 +909,7 @@ int funnel_stream_set_size(struct funnel_stream *stream, uint32_t width,
 
 int funnel_stream_set_mode(struct funnel_stream *stream,
                            enum funnel_mode mode) {
+    assert(stream);
 
     switch (mode) {
     case FUNNEL_ASYNC:

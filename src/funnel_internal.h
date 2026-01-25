@@ -37,6 +37,7 @@ struct funnel_stream_config {
     enum funnel_mode mode;
     enum funnel_sync backend_sync;
     enum funnel_sync frontend_sync;
+    uint32_t bo_flags;
 
     struct {
         int def, min, max;

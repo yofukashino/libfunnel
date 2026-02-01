@@ -145,7 +145,7 @@ int funnel_buffer_get_vk_format(struct funnel_buffer *buf, VkFormat *pformat,
 /**
  * Get the VkSemaphores for acquiring and releasing the buffer.
  *
- * The user must wait on the acquier VkSemaphore object before accessing
+ * The user must wait on the acquire VkSemaphore object before accessing
  * the buffer, and signal the release VkSemaphore after accessing the buffer.
  * These semaphores are valid while the buffer is dequeued.
  *
@@ -170,7 +170,7 @@ int funnel_buffer_get_vk_semaphores(struct funnel_buffer *buf,
  *
  * The user must pass this fence to vkQueueSubmit() (or similar),
  * such that it is signaled when all operations on the buffer
- * are complete. This fence is valid whil the buffer is
+ * are complete. This fence is valid while the buffer is
  * dequeued.
  *
  * @sync-ext

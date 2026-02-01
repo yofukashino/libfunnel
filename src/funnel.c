@@ -153,8 +153,8 @@ static void on_add_buffer(void *data, struct pw_buffer *pwbuffer) {
         ret = drmSyncobjCreate(fd, 0, &buffer->release.handle);
         assert(ret >= 0);
 
-        buffer->acquire.point = 0;
-        buffer->release.point = 0;
+        buffer->acquire.point = 1;
+        buffer->release.point = 1;
     }
 
     pw_log_debug("on_add_buffer: %p -> %p", pwbuffer, buffer);

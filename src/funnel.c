@@ -555,8 +555,7 @@ static void on_param_changed(void *data, uint32_t id,
                                      stream->cur.config.buffers.min,
                                      stream->cur.config.buffers.max),
             SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int(buffertypes),
-            0);
-        spa_pod_builder_add(&pod_builder.b, SPA_PARAM_BUFFERS_blocks,
+            SPA_PARAM_BUFFERS_blocks,
                             SPA_POD_Int(stream->cur.plane_count), 0);
         params[num_params++] =
             (struct spa_pod *)spa_pod_builder_pop(&pod_builder.b, &f);
@@ -568,9 +567,6 @@ static void on_param_changed(void *data, uint32_t id,
         SPA_POD_Int(sizeof(struct spa_meta_header)));
 
     if (stream->cur.config.backend_sync != FUNNEL_SYNC_IMPLICIT) {
-        struct spa_pod_dynamic_builder pod_builder;
-        spa_pod_dynamic_builder_init(&pod_builder, NULL, 0, 1024);
-
         params[num_params++] = (struct spa_pod *)spa_pod_builder_add_object(
             &pod_builder.b, SPA_TYPE_OBJECT_ParamMeta, SPA_PARAM_Meta,
             SPA_PARAM_META_type, SPA_POD_Id(SPA_META_SyncTimeline),

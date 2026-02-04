@@ -18,6 +18,7 @@ struct funnel_vk_stream {
     VkInstance instance;
     VkDevice device;
     VkPhysicalDevice physical_device;
+    uint32_t preferred_memory_types;
 
     PFN_vkGetMemoryFdPropertiesKHR vkGetMemoryFdPropertiesKHR;
     PFN_vkGetImageMemoryRequirements2KHR vkGetImageMemoryRequirements2KHR;
@@ -258,11 +259,16 @@ void funnel_vk_alloc_buffer(struct funnel_buffer *buffer) {
         vks->device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
         buffer->fds[0], &fd_props);
 
-    const uint32_t memory_type_bits =
+    uint32_t memory_type_bits =
         fd_props.memoryTypeBits & mem_reqs.memoryRequirements.memoryTypeBits;
 
-    pw_log_info("Memory type bits: 0x%x 0x%x -> 0x%x", fd_props.memoryTypeBits,
-                mem_reqs.memoryRequirements.memoryTypeBits, memory_type_bits);
+    if (memory_type_bits & vks->preferred_memory_types)
+        memory_type_bits &= vks->preferred_memory_types;
+
+    pw_log_info("Memory type bits: 0x%x & 0x%x [& 0x%x] -> 0x%x",
+                fd_props.memoryTypeBits,
+                mem_reqs.memoryRequirements.memoryTypeBits,
+                vks->preferred_memory_types, memory_type_bits);
 
     if (!memory_type_bits) {
         pw_log_error("No valid memory type");
@@ -284,7 +290,6 @@ void funnel_vk_alloc_buffer(struct funnel_buffer *buffer) {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .pNext = &memory_fd_info,
         .allocationSize = mem_reqs.memoryRequirements.size,
-        // XXX pick the best memory type?
         .memoryTypeIndex = ffs(memory_type_bits) - 1,
     };
 
@@ -526,6 +531,17 @@ int funnel_stream_init_vulkan(struct funnel_stream *stream, VkInstance instance,
         return -ENOTSUP;
     }
 
+    VkPhysicalDeviceMemoryProperties memory_properties;
+
+    vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+
+    uint32_t preferred_memory_types = 0;
+    for (int i = 0; i < memory_properties.memoryTypeCount; i++) {
+        if (memory_properties.memoryTypes[i].propertyFlags &
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+            preferred_memory_types |= 1L << i;
+    }
+
     VkPhysicalDeviceDrmPropertiesEXT drm_props = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT};
 
@@ -571,6 +587,7 @@ int funnel_stream_init_vulkan(struct funnel_stream *stream, VkInstance instance,
     vks->instance = instance;
     vks->device = device;
     vks->physical_device = physical_device;
+    vks->preferred_memory_types = preferred_memory_types;
 
     vks->vkGetMemoryFdPropertiesKHR = vkGetMemoryFdPropertiesKHR;
     vks->vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2KHR;

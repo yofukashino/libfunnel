@@ -1251,6 +1251,10 @@ int funnel_stream_configure(struct funnel_stream *stream) {
         // clang-format on
         assert(props);
 
+        const char *node_name = getenv("LIBFUNNEL_NODE_NAME") ?: stream->name;                
+        if (*node_name)
+            pw_properties_set(props, PW_KEY_NODE_NAME, node_name);
+
         stream->stream = pw_stream_new(ctx->core, stream->name, props);
         if (!stream->stream) {
             pw_log_error("failed to create PW stream");

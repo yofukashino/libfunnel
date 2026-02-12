@@ -1253,7 +1253,7 @@ int funnel_stream_configure(struct funnel_stream *stream) {
 
         const char *node_name = getenv("LIBFUNNEL_NODE_NAME") ?: stream->name;                
         if (*node_name)
-            pw_properties_set(props, PW_KEY_NODE_NAME, node_name);
+            pw_properties_set(props, PW_KEY_NODE_NICK, node_name);
 
         stream->stream = pw_stream_new(ctx->core, stream->name, props);
         if (!stream->stream) {
